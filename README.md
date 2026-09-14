@@ -39,6 +39,10 @@ whenever the original reads about as well as the transposition does.
 /plugin install kbfix@kbfix
 ```
 
+**[Try it in the browser](https://barmoshe.github.io/kbfix/)** before installing.
+The playground there runs this repository's actual engine, not a
+reimplementation of it.
+
 Needs `node` on your PATH. The default pair is English and Hebrew; set `pair` in
 `.kbfix.json` to change it.
 
@@ -196,6 +200,18 @@ What follows from that:
 The honest summary: the `en-es` pair buys you `ñ` and nothing else. Spanish
 paired with Hebrew or Russian behaves normally, because that is a cross-script
 pair like any other.
+
+## The site
+
+[barmoshe.github.io/kbfix](https://barmoshe.github.io/kbfix/) is built from
+`site/` and deployed by GitHub Actions on every push that touches the engine,
+the layouts or the page. It imports `scripts/lib` directly, which is why those
+modules are pure and all filesystem access lives in `scripts/lib/load.mjs`: the
+demo runs the real detector and cannot drift away from it.
+
+```bash
+cd site && npm install && npm run dev
+```
 
 ## Development
 
