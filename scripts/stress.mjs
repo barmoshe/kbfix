@@ -23,7 +23,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createEngine } from './kbfix.mjs';
 import { loadConfig } from './lib/config.mjs';
-import { transpose, installedLayouts, LAYOUTS_DIR } from './lib/layout.mjs';
+import { transpose } from './lib/layout.mjs';
+import { installedLayouts, LAYOUTS_DIR } from './lib/load.mjs';
 
 function arg(name, fallback = null) {
   const i = process.argv.indexOf(`--${name}`);

@@ -26,7 +26,8 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { loadLayout, loadLayouts, installedLayouts, LAYOUTS_DIR, transpose } from './lib/layout.mjs';
+import { transpose } from './lib/layout.mjs';
+import { loadLayout, loadLayouts, installedLayouts, LAYOUTS_DIR } from './lib/load.mjs';
 
 const WORDLIST_N = 5000;      // words that score 1.0 outright
 const CALIB_POOL = 30000;     // how many words each calibration pool draws

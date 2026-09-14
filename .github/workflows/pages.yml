@@ -1,0 +1,61 @@
+name: Deploy site to GitHub Pages
+
+# The site imports the plugin's real engine and its layout tables, so a change to
+# the detector changes the demo. Building on every push to main keeps the page
+# honest instead of frozen at whatever was last uploaded by hand.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'layouts/**'
+      - 'scripts/lib/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never cancel a running deploy half way; queue behind it instead.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      # The gates run here too. If the engine is broken there is no point
+      # publishing a playground that demonstrates it being broken.
+      - run: node scripts/kbfix.mjs --self-test
+      - run: node scripts/kbfix.mjs --bench
+      - run: bash tests/hook.test.sh
+
+      - run: npm ci
+        working-directory: site
+      - run: npm run build
+        working-directory: site
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

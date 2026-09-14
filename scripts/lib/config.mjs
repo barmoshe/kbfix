@@ -8,15 +8,9 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { DEFAULTS } from './defaults.mjs';
 
-export const DEFAULTS = {
-  pair: ['en', 'he'],
-  minSignalChars: 4,
-  minLetterDensity: 0.5,
-  minTargetScore: 0.65,
-  minMargin: 0.35,
-  minCandidateGap: 0.15,
-};
+export { DEFAULTS };
 
 export function configPaths() {
   const out = [];

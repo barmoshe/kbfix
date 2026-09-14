@@ -4,20 +4,15 @@
  * A layout is data: layouts/<lang>/layout.json says what every physical key
  * emits on that input source. Adding a language is adding a folder.
  *
+ * Pure on purpose: nothing here touches the filesystem, so the same code runs in
+ * a browser. Reading layouts off disk lives in load.mjs.
+ *
  * Everything is expressed against one REFERENCE keyboard, the US ANSI layout,
  * and a "key" is named by the character that reference emits. So decoding is
  * always two hops: text in the layout that produced it, back to the keys that
- * were pressed, forward into the layout that was meant. With N layouts that is
- * N-1 candidate readings for any input, and no N-squared table of pairs.
+ * were pressed, forward into the layout that was meant. Each layout is one
+ * table, so a language costs one folder however many others exist.
  */
-
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-export const PLUGIN_ROOT = join(HERE, '..', '..');
-export const LAYOUTS_DIR = join(PLUGIN_ROOT, 'layouts');
 
 /** Expand a letter class like "a-z" or "а-яёА-ЯЁ" into the literal characters. */
 export function expandLetterClass(spec) {
@@ -35,20 +30,7 @@ export function expandLetterClass(spec) {
   return out;
 }
 
-/** Every language that has a layouts/<lang>/layout.json. */
-export function installedLayouts({ layoutsDir = LAYOUTS_DIR } = {}) {
-  return readdirSync(layoutsDir, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && existsSync(join(layoutsDir, e.name, 'layout.json')))
-    .map((e) => e.name)
-    .sort();
-}
-
-export function loadLayout(lang, { layoutsDir = LAYOUTS_DIR } = {}) {
-  const file = join(layoutsDir, lang, 'layout.json');
-  if (!existsSync(file)) throw new Error(`kbfix: no layout "${lang}" (looked in ${file})`);
-  return compileLayout(JSON.parse(readFileSync(file, 'utf8')));
-}
-
+/** Turn a layout.json into the maps the transposition needs. */
 export function compileLayout(raw) {
   const keys = raw.keys || [];
 
@@ -93,12 +75,6 @@ export function compileLayout(raw) {
     unshift,
     raw,
   };
-}
-
-export function loadLayouts(langs, opts = {}) {
-  const out = new Map();
-  for (const lang of langs) out.set(lang, loadLayout(lang, opts));
-  return out;
 }
 
 /** Text as produced by `L` -> the reference keys that were pressed. */
