@@ -23,7 +23,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createEngine } from './kbfix.mjs';
 import { loadConfig } from './lib/config.mjs';
-import { transpose, LAYOUTS_DIR } from './lib/layout.mjs';
+import { transpose, installedLayouts, LAYOUTS_DIR } from './lib/layout.mjs';
 
 function arg(name, fallback = null) {
   const i = process.argv.indexOf(`--${name}`);
@@ -33,10 +33,23 @@ function arg(name, fallback = null) {
 const cacheDir = arg('cache', join(process.env.HOME || '.', '.cache', 'kbfix'));
 const N = Number(arg('n', '4000'));
 
-const engine = createEngine(loadConfig());
-const { layouts, langs } = engine;
+const baseConfig = loadConfig();
+const onlyPair = arg('pair');
 
-function corpusWords(lang, max) {
+// Every pair of installed layouts, or just the one named. kbfix runs on two
+// languages at a time, so accuracy is a property of a PAIR, not of the toolkit:
+// en-he and en-ru are separate configurations and each needs its own number.
+function allPairs() {
+  const langs = installedLayouts();
+  const out = [];
+  for (let i = 0; i < langs.length; i += 1) {
+    for (let j = i + 1; j < langs.length; j += 1) out.push([langs[i], langs[j]]);
+  }
+  return out;
+}
+const pairs = onlyPair ? [onlyPair.split('-')] : allPairs();
+
+function corpusWords(lang, max, layouts) {
   const spec = JSON.parse(readFileSync(join(LAYOUTS_DIR, lang, 'corpus.json'), 'utf8'));
   const file = join(cacheDir, spec.url.split('/').pop());
   if (!existsSync(file)) {
@@ -71,7 +84,7 @@ const pick = (a) => a[Math.floor(rnd() * a.length)];
 const sentence = (pool, lo, hi) =>
   Array.from({ length: lo + Math.floor(rnd() * (hi - lo + 1)) }, () => pick(pool)).join(' ');
 
-function falsePositives(label, pool, lo, hi) {
+function falsePositives(engine, label, pool, lo, hi) {
   let fired = 0;
   const examples = [];
   for (let i = 0; i < N; i += 1) {
@@ -87,7 +100,7 @@ function falsePositives(label, pool, lo, hi) {
   return fired;
 }
 
-function recall(from, to, pool, lo, hi) {
+function recall(engine, layouts, from, to, pool, lo, hi) {
   let caught = 0;
   let exact = 0;
   let wrongLayout = 0;
@@ -115,32 +128,37 @@ function recall(from, to, pool, lo, hi) {
   return wrongLayout;
 }
 
-const pools = new Map();
-const midPools = new Map();
-for (const lang of langs) {
-  pools.set(lang, corpusWords(lang, 3000));
-  midPools.set(lang, corpusWords(lang, 60000).slice(20000));
-}
+let badTotal = 0;
+console.log(`kbfix stress: ${pairs.length} pair(s), ${N} lines per sweep\n`);
 
-console.log(`kbfix stress: ${langs.join(', ')}, ${N} lines per sweep\n`);
-console.log('FALSE POSITIVES (real prose that must be left alone)');
-let bad = 0;
-for (const lang of langs) {
-  const label = layouts.get(lang).label;
-  bad += falsePositives(`${label} sentences`, pools.get(lang), 2, 7);
-  bad += falsePositives(`${label} uncommon words`, midPools.get(lang), 2, 7);
-  bad += falsePositives(`${label} short (2-3 words)`, pools.get(lang), 2, 3);
-}
-
-console.log('\nRECALL (genuine mistypes that should be caught)');
-let misrouted = 0;
-for (const from of langs) {
-  for (const to of langs) {
-    if (from === to) continue;
-    misrouted += recall(from, to, pools.get(from), 2, 7);
+for (const pair of pairs) {
+  const engine = createEngine({ ...baseConfig, pair });
+  const { layouts, langs } = engine;
+  const pools = new Map();
+  const midPools = new Map();
+  for (const lang of langs) {
+    pools.set(lang, corpusWords(lang, 3000, layouts));
+    midPools.set(lang, corpusWords(lang, 60000, layouts).slice(20000));
   }
+
+  console.log(`=== ${langs.join(' <-> ')} ${engine.sameScript ? '(same script: punctuation only)' : ''}`);
+  console.log('  false positives (real prose that must be left alone)');
+  let bad = 0;
+  for (const lang of langs) {
+    const label = layouts.get(lang).label;
+    bad += falsePositives(engine, `${label} sentences`, pools.get(lang), 2, 7);
+    bad += falsePositives(engine, `${label} uncommon words`, midPools.get(lang), 2, 7);
+    bad += falsePositives(engine, `${label} short (2-3 words)`, pools.get(lang), 2, 3);
+  }
+  console.log('  recall (genuine mistypes that should be caught)');
+  for (const from of langs) {
+    for (const to of langs) {
+      if (from !== to) recall(engine, layouts, from, to, pools.get(from), 2, 7);
+    }
+  }
+  badTotal += bad;
+  console.log(`  ${bad === 0 ? 'clean' : `${bad} FALSE POSITIVE(S)`}\n`);
 }
 
-console.log(bad === 0 ? '\nSTRESS CLEAN: no false positives' : `\nSTRESS FAILED: ${bad} false positive(s)`);
-if (misrouted) console.log(`WARNING: ${misrouted} reading(s) confidently attributed to the wrong layout`);
-process.exit(bad === 0 ? 0 : 1);
+console.log(badTotal === 0 ? 'STRESS CLEAN: no false positives in any pair' : `STRESS FAILED: ${badTotal} false positive(s)`);
+process.exit(badTotal === 0 ? 0 : 1);

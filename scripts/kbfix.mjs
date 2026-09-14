@@ -8,12 +8,10 @@
  * English one arrives as `ksudnt`, and `привет` arrives as `ghbdtn`. All of it
  * is recoverable.
  *
- * Detection is symmetric and works over any number of layouts. Identify which
- * alphabet the text is in, transpose it into every other installed layout, and
- * ask whether any of those readings is both plausible prose AND clearly better
- * than both the original and the runner-up. Otherwise say nothing: with three
- * layouts a Latin string has two possible readings, and picking the wrong one
- * is worse than picking neither.
+ * It works on TWO languages at a time, both ways, and the pair is configured
+ * rather than guessed. There is no search across installed layouts: for a
+ * cross-script pair the characters say which side the text came from, and the
+ * only question left is whether the reading is good enough to mention.
  *
  * What it never does is rewrite the prompt. The hook emits additionalContext
  * naming the reading and leaves the original text exactly as typed, so a false
@@ -23,6 +21,7 @@
  * Usage:
  *   kbfix "בםצצןא שמג פודי אם צשןמ"   detect and print the reading
  *   kbfix --json "..."                full verdict, with every candidate
+ *   kbfix --pair en-ru "..."          use this pair instead of the configured one
  *   kbfix --to ru "..."               force one direction, no scoring
  *   kbfix --force "..."               best transposition even when not confident
  *   kbfix --explain "..."             per-token scoring breakdown
@@ -49,48 +48,28 @@ const TESTS_DIR = join(PLUGIN_ROOT, 'tests');
 // ---------------------------------------------------------------------------
 
 export function createEngine(config = loadConfig()) {
-  const langs = config.layouts && config.layouts.length ? config.layouts : installedLayouts();
-  const layouts = loadLayouts(langs);
+  const [aLang, bLang] = config.pair;
+  if (!aLang || !bLang || aLang === bLang) {
+    throw new Error(`kbfix: pair must name two different layouts, got ${JSON.stringify(config.pair)} (installed: ${installedLayouts().join(', ')})`);
+  }
+  const layouts = loadLayouts([aLang, bLang]);
+  const A = layouts.get(aLang);
+  const B = layouts.get(bLang);
 
   const scorers = new Map();
   for (const [lang, L] of layouts) {
     scorers.set(lang, makeScorer(loadModel(lang), { letters: L.letters, structural: structuralRuleFor(L) }));
   }
 
-  const allowed = config.directions ? new Set(config.directions) : null;
-  const permitted = (from, to) => !allowed || allowed.has(`${from}->${to}`);
-
-  // Group the layouts by script. `primary` is the one layout per script used to
-  // transpose through (the reference keyboard where there is one), and
-  // `sameScript` holds every script that has more than one layout, which is
-  // where the awkward cases live.
-  const byScript = new Map();
-  for (const L of layouts.values()) {
-    if (!byScript.has(L.script)) byScript.set(L.script, []);
-    byScript.get(L.script).push(L);
-  }
-  const primary = new Map();
-  for (const [script, list] of byScript) primary.set(script, list.find((L) => L.reference) || list[0]);
-  const sameScript = new Map([...byScript].filter(([, list]) => list.length > 1));
+  const sameScript = A.script === B.script;
 
   /**
-   * How well does this text read in ANY language written in this script?
+   * One pair, both ways.
    *
-   * Taking the best is what stops a Spanish sentence being "recovered" as
-   * Hebrew: `duro jo` is mediocre English but perfectly good Spanish, and the
-   * margin has to be measured against the best explanation of the text as
-   * typed, not against whichever language happens to be listed first.
-   */
-  function bestScriptScore(text, script) {
-    let best = 0;
-    for (const L of byScript.get(script) || []) best = Math.max(best, scorers.get(L.lang)(text));
-    return best;
-  }
-
-  /**
-   * Whole-message or nothing. A line mixing two alphabets is left alone rather
-   * than half-decoded, because short words are genuinely ambiguous: `אם` is both
-   * real Hebrew ("if") and layout-typed `to`.
+   * Two languages at a time is the whole design. There is no search over
+   * installed layouts and no guessing which of several languages was meant: the
+   * only open question is which of the configured two produced the text, and
+   * for a cross-script pair the characters answer that outright.
    */
   function analyze(text) {
     const raw = text ?? '';
@@ -102,105 +81,61 @@ export function createEngine(config = loadConfig()) {
     if (signal < config.minSignalChars) return { ...base, reason: 'not enough letters to judge' };
     if (present.length > 1) return { ...base, reason: 'mixed scripts, left alone by design' };
 
-    // The language models only read letters, so a mostly-punctuation string is
-    // judged on almost nothing. `if (a) { b(); }` has exactly four letters, and
-    // they happen to spell if/a/b, which scored a flawless 1.0 as English and
-    // produced a confident reading of pure mangled code. Density, not just
-    // count: four letters out of four characters is evidence, four out of
-    // eleven is not.
+    // The models only read letters, so a mostly-punctuation string is judged on
+    // almost nothing. `if (a) { b(); }` has exactly four letters and they spell
+    // if/a/b, which scored a flawless 1.0 as English and produced a confident
+    // reading of pure mangled code. Density, not just count: four letters out of
+    // four characters is evidence, four out of eleven is not.
     const dense = raw.replace(/\s+/g, '').length;
     if (dense > 0 && signal / dense < config.minLetterDensity) {
       return { ...base, reason: 'too much punctuation relative to letters to judge' };
     }
 
-    // The characters name a SCRIPT, not a layout, and detection is organised
-    // the same way. Two layouts of one script agree on every letter, so they
-    // produce near-identical readings of the same input: offering both as rival
-    // candidates made them cancel each other out under the ambiguity gate and
-    // cost Hebrew-to-English recall a fifth of its accuracy. One candidate per
-    // target script, transposed through that script's reference layout, scored
-    // by whichever of its languages fits best.
+    // Which way round. A cross-script pair is decided by the characters
+    // themselves. A same-script pair (English and Spanish share every letter)
+    // cannot be, so both directions are tried and scored.
     const script = present[0][0];
-    const sourceScore = round(bestScriptScore(raw, script));
+    const directions = sameScript
+      ? [[A, B], [B, A]]
+      : [A.script === script ? [A, B] : [B, A]];
 
     const candidates = [];
-    for (const [targetScript, toL] of primary) {
-      if (targetScript === script) continue;
+    for (const [fromL, toL] of directions) {
+      const decoded = transpose(raw, fromL, toL);
 
-      // Which layout of the source script actually produced this text is not
-      // knowable from the characters, and it matters: Russian typed on a
-      // Spanish board arrives with ñ where ж should be, and recovering it
-      // through the English table leaves that ñ stranded inside a Cyrillic
-      // word. So try each one and keep the reading that comes out cleanest.
-      // Still ONE candidate per target script, so the alternatives never
-      // compete with each other under the ambiguity gate.
-      let best = null;
-      for (const fromL of byScript.get(script) || []) {
-        if (!permitted(fromL.lang, toL.lang)) continue;
-        const decoded = transpose(raw, fromL, toL);
-        if (decoded === raw) continue;
-        const junk = intraWordJunk(decoded, toL);
-        const score = junk
-          ? Math.min(round(bestScriptScore(decoded, targetScript)), GLUED_SOURCE_CAP)
-          : round(bestScriptScore(decoded, targetScript));
-        if (!best || score > best.target) {
-          best = {
-            // Named by language, which is what a person reads, even though the
-            // candidate is really "this script read as that one".
-            direction: `${fromL.lang}->${toL.lang}`,
-            decoded,
-            target: score,
-            source: sourceScore,
-            ...(junk ? { junk } : {}),
-          };
-        }
-      }
-      if (best) candidates.push(best);
+      // No change means no evidence. Two layouts of one script agree on every
+      // letter, so most text transposes to itself; scoring an unchanged string
+      // would just compare two language models and "detect" a mistype in text
+      // nobody mistyped, flagging every correctly typed Spanish sentence as
+      // English gone wrong.
+      if (decoded === raw) continue;
+
+      // Within one script the only recoverable mistake is a punctuation key
+      // that the other layout reads as a LETTER: ma;ana for mañana. Demand
+      // exactly that, or there is nothing to go on.
+      const glued = gluedLetters(raw, decoded, fromL, toL);
+      if (sameScript && !glued) continue;
+
+      const junk = intraWordJunk(decoded, toL);
+      const targetScore = round(scorers.get(toL.lang)(decoded));
+      const sourceScore = round(scorers.get(fromL.lang)(raw));
+      candidates.push({
+        direction: `${fromL.lang}->${toL.lang}`,
+        decoded,
+        target: junk ? Math.min(targetScore, GLUED_SOURCE_CAP) : targetScore,
+        source: glued ? Math.min(sourceScore, GLUED_SOURCE_CAP) : sourceScore,
+        ...(glued ? { glued } : {}),
+        ...(junk ? { junk } : {}),
+      });
     }
 
-    // Within one script the letters are identical, so the only recoverable
-    // mistake is a punctuation key that the other layout reads as a LETTER:
-    // ma;ana for mañana. Demand exactly that as the price of admission, which
-    // is why correctly typed Spanish never produces a candidate at all.
-    for (const fromL of sameScript.get(script) || []) {
-      const from = fromL.lang;
-      for (const toL of sameScript.get(script) || []) {
-        const to = toL.lang;
-        if (to === from || !permitted(from, to)) continue;
-        const decoded = transpose(raw, fromL, toL);
-        // No change means no evidence. Between two layouts that agree on every
-        // letter, most text transposes to itself, and scoring an unchanged
-        // string would just compare two language models and "detect" a mistype
-        // in text nobody mistyped: every correctly typed Spanish sentence would
-        // be flagged as English gone wrong. If the keys produce the same
-        // characters, there is nothing to report.
-        if (decoded === raw) continue;
-        const glued = gluedLetters(raw, decoded, fromL, toL);
-        if (!glued) continue;
-
-        // The word scorer cannot see this on its own: it splits on the very
-        // character that is the evidence and then scores the two halves as real
-        // words, which is how `ma;ana` scored a flawless 1.0 as English.
-        const junk = intraWordJunk(decoded, toL);
-        const targetScore = round(scorers.get(to)(decoded));
-        candidates.push({
-          direction: `${from}->${to}`,
-          decoded,
-          target: junk ? Math.min(targetScore, GLUED_SOURCE_CAP) : targetScore,
-          source: Math.min(round(scorers.get(from)(raw)), GLUED_SOURCE_CAP),
-          glued,
-          ...(junk ? { junk } : {}),
-        });
-      }
-    }
     if (candidates.length === 0) {
       return { ...base, reason: 'transposing changes nothing, so there is no evidence either way' };
     }
-    candidates.sort((a, b) => b.target - a.target);
-    const distinct = candidates;
+    candidates.sort((x, y) => y.target - x.target);
 
-    const best = distinct[0];
-    const runnerUp = distinct[1];
+    const best = candidates[0];
+    const runnerUp = candidates[1];
     return verdict({
       ...base,
       direction: best.direction,
@@ -208,11 +143,11 @@ export function createEngine(config = loadConfig()) {
       target: best.target,
       source: best.source,
       runnerUp: runnerUp ? round(runnerUp.target) : null,
-      candidates: distinct,
+      candidates,
     }, config);
   }
 
-  return { layouts, langs, config, analyze, scorers, analyzeCandidatesOnly: analyze };
+  return { layouts, langs: [aLang, bLang], A, B, sameScript, config, analyze, scorers };
 }
 
 /**
@@ -306,46 +241,73 @@ function gluedLetters(raw, decoded, fromL, toL) {
 
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
 
-function selfTest(engine) {
-  const { cases } = readJson(join(TESTS_DIR, 'fixtures.json'));
+/** Every pair of installed layouts, for the gates that must hold whatever is configured. */
+function allPairs() {
+  const langs = installedLayouts();
+  const out = [];
+  for (let i = 0; i < langs.length; i += 1) {
+    for (let j = i + 1; j < langs.length; j += 1) out.push([langs[i], langs[j]]);
+  }
+  return out;
+}
+
+const engineFor = (pair, config) => createEngine({ ...config, pair });
+
+function selfTest(config) {
+  const { pairs } = readJson(join(TESTS_DIR, 'fixtures.json'));
   let failed = 0;
-  for (const c of cases) {
-    const r = engine.analyze(c.input);
-    const got = r.confident ? r.decoded : null;
-    const gotDir = r.confident ? r.direction : null;
-    if (got === (c.expect ?? null) && gotDir === (c.direction ?? null)) {
-      console.log(`ok    ${JSON.stringify(c.input)} -> ${JSON.stringify(got)}`);
-    } else {
+
+  for (const [pairId, cases] of Object.entries(pairs)) {
+    const pair = pairId.split('-');
+    let engine;
+    try {
+      engine = engineFor(pair, config);
+    } catch (err) {
       failed += 1;
-      console.error(`FAIL  ${JSON.stringify(c.input)}   (${c.why || ''})`);
-      console.error(`      expected ${JSON.stringify(c.expect ?? null)} (${c.direction ?? null})`);
-      console.error(`      got      ${JSON.stringify(got)} (${gotDir})  ${JSON.stringify(r.scores)}  ${r.reason}`);
+      console.error(`FAIL  pair ${pairId}: ${err.message}`);
+      continue;
+    }
+    console.log(`\n--- ${pairId} ---`);
+    for (const c of cases) {
+      const r = engine.analyze(c.input);
+      const got = r.confident ? r.decoded : null;
+      const gotDir = r.confident ? r.direction : null;
+      if (got === (c.expect ?? null) && gotDir === (c.direction ?? null)) {
+        console.log(`ok    ${JSON.stringify(c.input)} -> ${JSON.stringify(got)}`);
+      } else {
+        failed += 1;
+        console.error(`FAIL  ${JSON.stringify(c.input)}   (${c.why || ''})`);
+        console.error(`      expected ${JSON.stringify(c.expect ?? null)} (${c.direction ?? null})`);
+        console.error(`      got      ${JSON.stringify(got)} (${gotDir})  ${JSON.stringify(r.scores)}  ${r.reason}`);
+      }
     }
   }
 
-  // Property: every key round-trips through every non-reference layout.
-  for (const [lang, L] of engine.layouts) {
+  // Table properties, checked against the reference keyboard for every layout.
+  console.log('\n--- layout tables ---');
+  const langs = installedLayouts();
+  const all = loadLayouts(langs);
+  const en = all.get('en');
+  for (const [lang, L] of all) {
     if (L.reference) continue;
+    let bad = 0;
     for (const [key, out] of L.raw.keys) {
       if (L.recover.get(out) !== key) continue; // a collision resolved to another key
-      const back = transpose(out, L, engine.layouts.get('en') || L);
-      if (back !== key) { failed += 1; console.error(`FAIL  round-trip ${lang}: ${key} -> ${out} -> ${back}`); }
+      if (transpose(out, L, en) !== key) { bad += 1; console.error(`FAIL  round-trip ${lang}: ${key} -> ${out}`); }
     }
-    // Property: a dropped key emits nothing faithfully. When decoding it falls
-    // back to its unshifted key, but ONLY where such a key exists: Hebrew drops
-    // 21 shifted letters, which all have one, while Spanish drops [ { ' " -
-    // dead keys for accents, which have no unshifted letter behind them and
-    // stay unrecoverable.
-    const en = engine.layouts.get('en');
     for (const ch of L.dropped) {
       if (transpose(ch, en, L, { faithful: true }) !== '') {
-        failed += 1; console.error(`FAIL  ${lang}: ${ch} should emit nothing in faithful mode`);
+        bad += 1; console.error(`FAIL  ${lang}: ${ch} should emit nothing in faithful mode`);
       }
+      // Only where an unshifted key exists behind it. Hebrew drops 21 shifted
+      // letters, which all have one; Spanish drops dead keys, which do not.
       const base = L.unshift.get(ch);
       if (base && L.emit.has(base) && transpose(ch, en, L, { faithful: false }) === '') {
-        failed += 1; console.error(`FAIL  ${lang}: ${ch} should fall back to its unshifted key when decoding`);
+        bad += 1; console.error(`FAIL  ${lang}: ${ch} should fall back to its unshifted key when decoding`);
       }
     }
+    failed += bad;
+    if (bad === 0) console.log(`ok    ${lang}: ${L.raw.keys.length} keys round-trip, ${L.dropped.size} dropped behave`);
   }
 
   console.log(failed === 0 ? '\nALL KBFIX TESTS PASSED' : `\n${failed} KBFIX TEST(S) FAILED`);
@@ -355,30 +317,36 @@ function selfTest(engine) {
 /**
  * The false-positive gate.
  *
- * Every ordinary prompt is a detection candidate, so the corpus that must be
- * left ALONE is the one that decides whether this is shippable. Anything flagged
- * here is a bug, not a tuning opportunity.
+ * Run under EVERY pair, not just the configured one. These lines must be left
+ * alone whatever two languages someone has set, and a line that is safe under
+ * en-he can still be wrongly read under en-ru.
  */
-function bench(engine) {
+function bench(config) {
   const { quiet } = readJson(join(TESTS_DIR, 'bench.json'));
+  const pairs = allPairs();
   let hits = 0;
+  let checked = 0;
+
   for (const group of quiet) {
     let groupHits = 0;
-    for (const line of group.lines) {
-      const r = engine.analyze(line);
-      if (r.confident) {
-        groupHits += 1;
-        console.error(`FALSE POSITIVE  ${JSON.stringify(line)}`);
-        console.error(`                read as ${JSON.stringify(r.decoded)} (${r.direction}) ${JSON.stringify(r.scores)}`);
+    for (const pair of pairs) {
+      const engine = engineFor(pair, config);
+      for (const line of group.lines) {
+        checked += 1;
+        const r = engine.analyze(line);
+        if (r.confident) {
+          groupHits += 1;
+          console.error(`FALSE POSITIVE  [${pair.join('-')}] ${JSON.stringify(line)}`);
+          console.error(`                read as ${JSON.stringify(r.decoded)} (${r.direction}) ${JSON.stringify(r.scores)}`);
+        }
       }
     }
     hits += groupHits;
-    console.log(`${groupHits === 0 ? 'ok   ' : 'FAIL '} ${group.label}: ${group.lines.length} lines, ${groupHits} false positive(s)`);
+    console.log(`${groupHits === 0 ? 'ok   ' : 'FAIL '} ${group.label}: ${group.lines.length} lines x ${pairs.length} pairs, ${groupHits} false positive(s)`);
   }
-  const total = quiet.reduce((n, g) => n + g.lines.length, 0);
   console.log(hits === 0
-    ? `\nBENCH CLEAN: 0 false positives over ${total} lines of real prose`
-    : `\nBENCH FAILED: ${hits} false positive(s) over ${total} lines`);
+    ? `\nBENCH CLEAN: 0 false positives over ${checked} checks (${pairs.length} pairs)`
+    : `\nBENCH FAILED: ${hits} false positive(s) over ${checked} checks`);
   return hits === 0 ? 0 : 1;
 }
 
@@ -390,6 +358,7 @@ const HELP = `kbfix - recover text typed with the wrong keyboard layout selected
 
   kbfix "<text>"           detect and print the reading
   kbfix --json "<text>"    full verdict, including every candidate reading
+  kbfix --pair en-ru "..." use this pair for one run, instead of the config
   kbfix --to <lang> "..."  force a direction, no scoring (--to-en, --to-he alias)
   kbfix --faithful         with --to, simulate the keyboard exactly (drops the
                            shifted keys that emit nothing) instead of falling
@@ -405,10 +374,10 @@ const HELP = `kbfix - recover text typed with the wrong keyboard layout selected
 
 Reads stdin when given no text. Exit 0 confident, 3 abstained, 1 usage error.
 
-Detection is whole-message or nothing, runs between every installed layout, and
-abstains on mixed-script input or when two layouts read equally well. Configure
-with .kbfix.json in the project or your home directory; see
-kbfix.config.example.json.
+kbfix works on TWO languages at a time, both ways. Set the pair in .kbfix.json in
+the project or your home directory (see kbfix.config.example.json); the default
+is en-he, and --layouts lists what is installed. Detection is whole-message or
+nothing and abstains on mixed-script input.
 
 Known limits of the shipped tables, all verified against the real layouts:
   - On the Hebrew layout 21 shifted Latin letters emit nothing, so capitals are
@@ -430,12 +399,15 @@ async function readStdin() {
 async function main() {
   const argv = process.argv.slice(2);
   const flags = new Set(argv.filter((a) => a.startsWith('--')));
+  const pairIndex = argv.indexOf('--pair');
+  const pairArg = pairIndex > -1 ? argv[pairIndex + 1] : null;
   const toIndex = argv.indexOf('--to');
   const toLang = toIndex > -1 ? argv[toIndex + 1] : null;
   // Guard the -1: `toIndex + 1` would be 0 when --to is absent, which silently
   // eats the first positional argument.
   const toValueIndex = toIndex > -1 ? toIndex + 1 : -1;
-  const rest = argv.filter((a, i) => !a.startsWith('--') && i !== toValueIndex);
+  const pairValueIndex = pairIndex > -1 ? pairIndex + 1 : -1;
+  const rest = argv.filter((a, i) => !a.startsWith('--') && i !== toValueIndex && i !== pairValueIndex);
 
   if (flags.has('--help') || flags.has('-h')) { console.log(HELP); return 0; }
 
@@ -463,20 +435,25 @@ async function main() {
     return 0;
   }
 
-  const engine = createEngine();
+  const baseConfig = loadConfig();
+  const engine = createEngine(pairArg ? { ...baseConfig, pair: pairArg.split('-') } : baseConfig);
 
   if (flags.has('--layouts')) {
-    for (const [lang, L] of engine.layouts) {
-      console.log(`${lang}\t${L.label}${L.reference ? '  (reference keyboard)' : ''}\t${L.raw.keys ? L.raw.keys.length : 0} keys`);
+    const active = new Set(engine.langs);
+    for (const lang of installedLayouts()) {
+      const L = loadLayouts([lang]).get(lang);
+      const mark = active.has(lang) ? '*' : ' ';
+      console.log(`${mark} ${lang}\t${L.label}${L.reference ? '  (reference keyboard)' : ''}\t${L.raw.keys ? L.raw.keys.length : 0} keys\t${L.script}`);
     }
+    console.log(`\n* = the configured pair, ${engine.langs.join(' <-> ')}. Two at a time; set "pair" in .kbfix.json to change it.`);
     return 0;
   }
   if (flags.has('--config')) {
     console.log(JSON.stringify({ ...engine.config, active: engine.langs }, null, 2));
     return 0;
   }
-  if (flags.has('--self-test')) return selfTest(engine);
-  if (flags.has('--bench')) return bench(engine);
+  if (flags.has('--self-test')) return selfTest(engine.config);
+  if (flags.has('--bench')) return bench(engine.config);
 
   const text = rest.length > 0 ? rest.join(' ') : (await readStdin()).replace(/\n$/, '');
   if (!text) { console.error(HELP); return 1; }
@@ -490,9 +467,13 @@ async function main() {
   if (forced) {
     const to = engine.layouts.get(forced);
     if (!to) { console.error(`kbfix: no layout "${forced}" (have: ${engine.langs.join(', ')})`); return 1; }
+    // Source is the configured layout the text is NOT being converted to.
+    // scriptCounts reports scripts, so match on that rather than on language.
     const counts = scriptCounts(text, engine.layouts);
-    const present = [...counts].filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
-    const from = engine.layouts.get(present.length ? present[0][0] : 'en') || engine.layouts.get('en');
+    const present = [...counts].filter(([, n]) => n > 0).sort((x, y) => y[1] - x[1]);
+    const script = present.length ? present[0][0] : null;
+    const from = [engine.A, engine.B].find((L) => L.lang !== forced && (!script || L.script === script))
+      || [engine.A, engine.B].find((L) => L.lang !== forced);
     console.log(transpose(text, from, to, { faithful: flags.has('--faithful') }));
     return 0;
   }

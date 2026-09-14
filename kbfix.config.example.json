@@ -1,22 +1,18 @@
 {
   "_": "Copy this to .kbfix.json in your project, or to ~/.kbfix.json for the whole machine. Project wins over home. Every field is optional; what is shown here is the default.",
-  "_layouts": "Which layouts to consider. Omit it and every installed layout is active (see layouts/). Narrowing the list is worth doing: every extra language is another candidate reading on every prompt. If you never type Spanish, leaving it out costs you nothing, since English and Spanish share every letter and only the ñ key is recoverable between them. The pre-0.2 form {\"pair\": \"en-he\"} still works and means [\"en\", \"he\"].",
-  "layouts": [
+  "_pair": "The two languages to convert between, both ways. kbfix works on exactly TWO at a time: it is not a language detector, and it will not guess which of several languages you meant. Run --layouts to see what is installed (en, es, he, ru ship). Older forms still parse: \"en-he\" as a string, and the 0.2 \"layouts\" array, which is cut to its first two entries.",
+  "pair": [
     "en",
-    "es",
-    "he",
-    "ru"
+    "he"
   ],
-  "_directions": "Which transpositions to allow, as \"from->to\". Omit it for all of them. Use it to switch one off, for example to detect Hebrew typed on the English layout but never the reverse.",
-  "directions": null,
   "_minSignalChars": "Below this many letters there is not enough evidence either way, so it says nothing. Lowering it will start guessing at things like /pr.",
   "minSignalChars": 4,
   "_minLetterDensity": "Letters must be at least this fraction of the non-space characters. The models only read letters, so `if (a) { b(); }` would otherwise be judged on four of them, which happen to spell if/a/b and scored a perfect 1.0 as English.",
   "minLetterDensity": 0.5,
-  "_minTargetScore": "How much the transposed text has to read like real prose, 0 to 1. Raised from 0.55 to 0.65 when Spanish arrived: a two-word Latin string that is no known language but transposes into plausible Hebrew used to slip through at 0.62, and genuine mistypes score 1.0, so the headroom is free.",
+  "_minTargetScore": "How much the transposed text has to read like real prose, 0 to 1.",
   "minTargetScore": 0.65,
   "_minMargin": "How far the transposition has to beat the text as typed. This is the gate that keeps ordinary prompts safe, because real prose scores near 1 in its own language and nothing can beat it by this much.",
   "minMargin": 0.35,
-  "_minCandidateGap": "How far the best reading has to beat the second-best. Only bites with three or more layouts: a Latin string can read plausibly as both Hebrew and Russian, and when it does, neither answer is safe to give. Raising all three thresholds makes it quieter; lowering them makes it guess.",
+  "_minCandidateGap": "How far the better reading has to beat the other one. Only applies to a same-script pair like en-es, where both directions are possible at once; a cross-script pair has exactly one candidate and this never bites.",
   "minCandidateGap": 0.15
 }

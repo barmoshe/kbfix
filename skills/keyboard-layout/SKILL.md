@@ -1,6 +1,6 @@
 ---
 name: keyboard-layout
-description: Use when text arrived through the wrong keyboard layout, so it looks like consonant soup in another alphabet. Covers the kbfix tool, every direction between the installed layouts (English, Hebrew, Russian), and the four ways a naive character swap gets it wrong. Triggers on unreadable strings like "בםצצןא שמג פודי", "ksudnt" or "ghbdtn", "this is gibberish", "wrong keyboard", "fix this text I typed in the wrong language", "layout", "מקלדת", "раскладка", or a prompt that only parses once transposed.
+description: Use when text arrived through the wrong keyboard layout, so it looks like consonant soup in another alphabet. Covers the kbfix tool, which converts between a configured PAIR of languages in both directions (English, Hebrew, Russian and Spanish ship), and the four ways a naive character swap gets it wrong. Triggers on unreadable strings like "בםצצןא שמג פודי", "ksudnt" or "ghbdtn", "this is gibberish", "wrong keyboard", "fix this text I typed in the wrong language", "layout", "מקלדת", "раскладка", or a prompt that only parses once transposed.
 license: MIT
 ---
 
@@ -11,6 +11,13 @@ characters arrive from whichever layout was active. `commit and push to main`
 typed while Hebrew is selected arrives as `בםצצןא שמג פודי אם צשןמ`, `לדוגמא`
 typed while English is selected arrives as `ksudnt`, and `привет` arrives as
 `ghbdtn`. Nothing is lost except the rendering, so all of it is recoverable.
+
+**kbfix converts between TWO configured languages, both ways. It is not a
+language detector.** The pair lives in `.kbfix.json` (default `["en", "he"]`); run
+the tool with `--layouts` to see what is installed and which pair is active, or
+`--pair en-ru` to use another for one run. With `en-he` configured, Russian
+gibberish is left alone on purpose, and that is correct behaviour rather than a
+miss.
 
 English, Hebrew, Russian and Spanish ship. Everything is expressed against one
 reference keyboard (US ANSI), so decoding is two hops: text back to the keys that
@@ -40,11 +47,10 @@ transpose without scoring, `--layouts` to see what is installed, `--force` to tr
 abstained, `--self-test` and `--bench` for the gates. Exit 0 means confident, 3
 means it abstained. `--help` carries the full flag list.
 
-Detection runs between **every installed layout** and is whole-message or
-nothing. The verdict is symmetric: transpose into each other layout, then ask
-whether any reading is plausible prose, clearly better than the text as typed,
-and clearly better than the runner-up. With three layouts a Latin string has two
-possible readings, and when both look fine it abstains rather than pick.
+Detection runs between the configured pair only, and is whole-message or nothing.
+The verdict is symmetric: transpose, then ask whether the result is plausible
+prose and clearly better than the text as typed. For a cross-script pair the
+characters decide the direction outright, so there is nothing to guess.
 
 ## How it decides
 
@@ -87,8 +93,9 @@ The tool refuses rather than guesses in these cases, and you should too:
 - **Mixed scripts.** `commit and push לmain` is left alone. Half-decoding is
   worse than not decoding, because short words are ambiguous: `אם` is at once
   real Hebrew ("if") and layout-typed `to`.
-- **Two readings score equally well.** Latin input could be intended Hebrew or
-  intended Russian. When neither wins clearly, no answer is safe.
+- **Two readings score equally well.** Only possible for a same-script pair like
+  `en-es`, where both directions are open at once. When neither wins, no answer
+  is safe.
 - **Transposing changes nothing.** Between two layouts of the same script there
   is simply no evidence, which is why correctly typed Spanish is never touched.
 - **Mostly punctuation.** The scorer reads only letters, so `if (a) { b(); }`

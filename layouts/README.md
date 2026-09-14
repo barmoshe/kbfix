@@ -14,8 +14,11 @@ layouts/<lang>/
 Everything is expressed against one **reference keyboard**, the US ANSI layout
 (`layouts/en/`), and a key is named by the character that reference emits. So
 decoding is two hops: text back to the keys that were pressed, then forward into
-the layout that was meant. Four layouts give twelve directions and still only
-four folders. There is no table of pairs.
+the layout that was meant. Each layout is one table, so a language costs one
+folder no matter how many others are installed.
+
+kbfix runs on **two** of them at a time, named by `pair` in `.kbfix.json`.
+Installing a layout makes it available; it does not put it into the detector.
 
 Shipped: English (the reference), Hebrew, Russian, Spanish.
 
@@ -156,9 +159,13 @@ bench matters more than the fixtures: a miss costs nothing, but a false positive
 puts words in somebody's mouth. Anything that fires there is a bug, not a tuning
 opportunity.
 
-Adding a layout makes every existing language's job harder, because every input
-gains another candidate reading. Re-run all three gates for **every** language
-after adding one, not just the new one. Adding Spanish is the cautionary tale: on
-its own it looked fine, while Hebrew-to-English recall had quietly fallen from
-99.4% to 77.6% and six new false positives had appeared elsewhere. Only the full
-sweep showed it.
+`--bench` runs every line under every pair, and `stress.mjs` sweeps every pair in
+turn, because accuracy is a property of the PAIR and not of the toolkit. Check
+the pairs your new language forms with each existing one, not just the obvious
+one against English.
+
+This used to matter far more. When the detector searched every installed layout
+at once, adding Spanish quietly cut Hebrew-to-English recall from 99.4% to 77.6%
+and introduced false positives in text that had nothing to do with Spanish, all
+while its own fixtures passed. Configuring one pair at a time removed that whole
+class of interference: a language you are not using cannot cost you anything.

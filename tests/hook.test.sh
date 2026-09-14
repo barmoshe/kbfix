@@ -36,7 +36,7 @@ check "fires on a Hebrew-layout mistype"  0 'commit and push to main' \
   '{"hook_event_name":"UserPromptSubmit","prompt":"בםצצןא שמג פודי אם צשןמ"}'
 check "fires on an English-layout mistype" 0 'לדוגמא' \
   '{"hook_event_name":"UserPromptSubmit","prompt":"ksudnt"}'
-check "fires on a Russian mistype"         0 'привет' \
+check "silent on Russian under the en-he pair" 0 silent \
   '{"hook_event_name":"UserPromptSubmit","prompt":"ghbdtn"}'
 check "silent on real Russian"             0 silent \
   '{"hook_event_name":"UserPromptSubmit","prompt":"спасибо большое за помощь"}'
@@ -58,6 +58,19 @@ case "$out" in
   *updatedPrompt*) fail=$((fail + 1)); echo "FAIL  output must never contain updatedPrompt" ;;
   *) pass=$((pass + 1)); echo "ok    output never contains updatedPrompt" ;;
 esac
+
+# The configured pair has to reach the hook, not just the CLI. Same input, a
+# different .kbfix.json, and the answer must change.
+pairdir="$(mktemp -d)"
+printf '{"pair":["en","ru"]}' > "$pairdir/.kbfix.json"
+pair_out="$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"ghbdtn"}' \
+  | CLAUDE_PLUGIN_ROOT="$root" CLAUDE_PROJECT_DIR="$pairdir" bash "$hook" 2>/dev/null)"
+case "$pair_out" in
+  *привет*) pass=$((pass + 1)); echo "ok    the en-ru pair from .kbfix.json reaches the hook" ;;
+  *) fail=$((fail + 1)); echo "FAIL  pair config did not reach the hook (out=${pair_out:0:160})" ;;
+esac
+rm -f "$pairdir/.kbfix.json"
+rmdir "$pairdir"
 
 echo
 echo "--- engine ---"

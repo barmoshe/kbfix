@@ -22,7 +22,11 @@ Then:
   transposition, or two layouts reading equally well. Say which one in plain
   words.
 - **If they clearly want one specific language**, skip the scoring entirely and
-  use `--to <lang>` (`--layouts` lists what is installed).
+  use `--to <lang>`.
+- **If the languages they want are not the configured pair**, pass
+  `--pair <a>-<b>`. kbfix converts between two languages at a time, so asking it
+  to read Russian while `en-he` is configured gets nothing; `--layouts` lists what
+  is installed and marks the active pair.
 
 This command converts on request, so it has no confidence gate to respect: when
 someone explicitly asks, give them the transposition even if the detector would

@@ -15,7 +15,10 @@ Nothing was lost when you typed that. The keystrokes landed; only the table that
 rendered them was wrong. kbfix reads every prompt, and when it is confident the
 keys came out of the wrong layout it tells Claude how the prompt actually reads.
 
-English, Hebrew, Russian and Spanish ship. Adding a language is adding a folder.
+It works on **two languages at a time**, both ways, and you choose which two. It
+is not a language detector and it will not guess among several languages: you
+configure a pair, and it converts between exactly those. English, Hebrew, Russian
+and Spanish ship; adding a language is adding a folder.
 
 ## What it does not do
 
@@ -26,9 +29,8 @@ silently replaced your words would, on its first false positive, destroy
 something you meant.
 
 For the same reason it would rather say nothing than guess. It abstains on mixed
-scripts, on anything under four letters, on text that is mostly punctuation, when
-two readings are equally good, and whenever the original reads about as well as
-the transposition does.
+scripts, on anything under four letters, on text that is mostly punctuation, and
+whenever the original reads about as well as the transposition does.
 
 ## Install
 
@@ -37,7 +39,8 @@ the transposition does.
 /plugin install kbfix@kbfix
 ```
 
-Needs `node` on your PATH.
+Needs `node` on your PATH. The default pair is English and Hebrew; set `pair` in
+`.kbfix.json` to change it.
 
 ## Use
 
@@ -56,9 +59,10 @@ Or from the shell:
 node scripts/kbfix.mjs "בםצצןא שמג פודי אם צשןמ"   # detect and print the reading
 node scripts/kbfix.mjs --json "..."                 # full verdict, every candidate
 node scripts/kbfix.mjs --explain "..."              # per-token breakdown
+node scripts/kbfix.mjs --pair en-ru "ghbdtn"        # use another pair for one run
 node scripts/kbfix.mjs --to ru "hello"              # force a direction, no scoring
 node scripts/kbfix.mjs --force "..."                # best guess after it abstained
-node scripts/kbfix.mjs --layouts                    # what is installed
+node scripts/kbfix.mjs --layouts                    # what is installed, and the active pair
 ```
 
 Exit 0 means confident, 3 means it abstained.
@@ -70,30 +74,26 @@ your project, or `~/.kbfix.json` for the whole machine. Project wins over home.
 
 ```json
 {
-  "layouts": ["en", "he"],
+  "pair": ["en", "he"],
   "minTargetScore": 0.65,
-  "minMargin": 0.35,
-  "minCandidateGap": 0.15
+  "minMargin": 0.35
 }
 ```
 
-Listing only the layouts you actually type is worth doing: every extra language
-adds a candidate reading to every prompt. Raise the thresholds to make it
-quieter.
+`pair` is the one setting that matters. Raise the thresholds to make it quieter.
 
 ## How it decides
 
 Everything is expressed against one reference keyboard, the US ANSI layout, and a
 key is named by the character that reference emits. Decoding is two hops: text
 back to the keys that were pressed, then forward into the layout that was meant.
-Four layouts give twelve directions and still only four tables.
+Each layout is one small table, so a language costs one folder.
 
-For each prompt it works out which **script** the text is in, transposes it into
-each other script, and asks whether any reading is plausible prose, clearly
-better than the text as typed, and clearly better than the runner-up. Script, not
-language: English and Spanish both write Latin, so nothing in the characters says
-which of them produced a string, and offering both as rival readings would just
-make them cancel out.
+For each prompt it works out which of your two configured languages the text is
+written in, transposes it into the other, and asks whether the result is
+plausible prose and clearly better than the text as typed. For a cross-script
+pair the characters settle the direction outright, which is why there is nothing
+to guess.
 
 "Reads like prose" is three channels per language. A list of the most frequent
 words scores 1 outright. A character-bigram model scores everything else on
@@ -116,22 +116,25 @@ Models are generated from published frequency corpora by
 
 ## Accuracy
 
-Measured with `scripts/stress.mjs` over sentences built from the same corpora the
-models were trained on, 4,000 lines per sweep:
+Accuracy is a property of the **pair**, not of the tool, so it is reported that
+way. Measured with `scripts/stress.mjs`, 4,000 lines per sweep, zero false
+positives in every pair:
 
-| | result |
-|---|---|
-| False positives, 48,000 lines of real English, Spanish, Hebrew and Russian | **0** |
-| Caught, English typed on the Hebrew or Russian layout | 99.9% |
-| Caught, Hebrew typed on the English or Russian layout | 99.4% / 99.6% |
-| Caught, Russian typed on the English or Hebrew layout | 99.7% / 99.6% |
-| Exact decode, across those three | **100%** |
-| Caught, Spanish typed on a US layout | **5.5%**, and that is the ceiling |
+| pair | caught | exact decode |
+|---|---|---|
+| **en ↔ he** (default) | 99.9% / 99.7% | **100%** |
+| **en ↔ ru** | 99.9% / 99.9% | **100%** |
+| **he ↔ ru** | 99.7% / 99.7% | **100%** |
+| en ↔ es | 0% / 5.5% | 100% |
+| es ↔ he | 48% / 82% | partial |
+| es ↔ ru | 49% / 96% | partial |
 
-Spanish is the odd one out, for a reason no amount of tuning changes. See below.
+The three cross-script pairs are what this is for. Spanish is the odd one out for
+a reason no amount of tuning changes, explained below.
 
-`node scripts/kbfix.mjs --bench` is the committed gate and must stay at zero
-false positives.
+`node scripts/kbfix.mjs --bench` is the committed gate: every line must be left
+alone under **every** pair, not just the configured one, because a line that is
+safe under en-he can still be misread under en-ru.
 
 ## Known limits
 
@@ -146,6 +149,9 @@ All verified against the real layouts, not assumed:
   directional signal, so a number-heavy string is genuinely undecidable.
 - **Mixed-script lines are left alone** rather than half-decoded. `אם` is at once
   real Hebrew ("if") and layout-typed `to`.
+- **Only the configured pair is considered.** With `en-he` set, `ghbdtn` is left
+  alone rather than read as `привет`. That is the design: two at a time, chosen
+  rather than guessed. Use `--pair en-ru` for a one-off.
 - **Short mistypes get missed.** `.פר` could be `/pr`, but four letters is the
   floor for having any evidence at all.
 - **Text that is mostly punctuation is left alone.** The models only read
@@ -187,8 +193,9 @@ What follows from that:
   That is a different script, so the usual machinery applies; the shortfall is
   accented words, which arrive as mixed script and are left alone by design.
 
-The honest summary: adding Spanish buys you `ñ`. If you never type Spanish, leave
-it out of `layouts` in your config and the detector has one less thing to weigh.
+The honest summary: the `en-es` pair buys you `ñ` and nothing else. Spanish
+paired with Hebrew or Russian behaves normally, because that is a cross-script
+pair like any other.
 
 ## Development
 
