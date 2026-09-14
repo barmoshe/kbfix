@@ -13,7 +13,8 @@ export const DEFAULTS = {
   layouts: null,          // null means every installed layout
   directions: null,       // null means every direction between them
   minSignalChars: 4,
-  minTargetScore: 0.55,
+  minLetterDensity: 0.5,
+  minTargetScore: 0.65,
   minMargin: 0.35,
   minCandidateGap: 0.15,
 };

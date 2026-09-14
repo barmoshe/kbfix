@@ -1,6 +1,7 @@
 {
   "lang": "ru",
   "label": "Russian",
+  "script": "cyrillic",
   "provenance": "Extracted with UCKeyTranslate on macOS against the input sources \"ABC\" and \"Russian\" (the standard ЙЦУКЕН board), 2026-09-14, by scripts/dump-layout.swift. Not written from memory. WRONG for \"Russian - QWERTY\", which is a phonetic layout and maps completely differently.",
   "hasCase": true,
   "letterClass": "а-яёА-ЯЁ",

@@ -14,18 +14,27 @@ layouts/<lang>/
 Everything is expressed against one **reference keyboard**, the US ANSI layout
 (`layouts/en/`), and a key is named by the character that reference emits. So
 decoding is two hops: text back to the keys that were pressed, then forward into
-the layout that was meant. Three layouts give six directions and still only
-three folders. There is no table of pairs.
+the layout that was meant. Four layouts give twelve directions and still only
+four folders. There is no table of pairs.
 
-Shipped: English (the reference), Hebrew, Russian.
+Shipped: English (the reference), Hebrew, Russian, Spanish.
+
+**Before adding a language, check whether it shares a script with one already
+here.** That single fact decides how well it can possibly work. Hebrew and
+Russian write different scripts from English, so every letter moves and a
+wrong-layout mistake is fully recoverable. Spanish writes the same script and
+puts every letter `a` to `z` in the same place: exactly zero letters differ
+between the two tables, so the only recoverable mistake is a punctuation key that
+the other layout reads as a letter (`;` for `ñ`). A same-script layout will never
+reach the accuracy of a cross-script one, no matter how good its corpus is.
 
 ## The shipped tables are not universal
 
-They were extracted from the macOS input sources **"ABC"**, **"Hebrew"** and
-**"Russian"** (the standard ЙЦУКЕН board). They are wrong for **"Hebrew -
-QWERTY"**, **"Hebrew - PC"**, and the phonetic **"Russian - QWERTY"**, which map
-completely differently. If you use one of those, or another language, generate
-your own.
+They were extracted from the macOS input sources **"ABC"**, **"Hebrew"**,
+**"Russian"** (the standard ЙЦУКЕН board) and **"Spanish"** (ISO). They are wrong
+for **"Hebrew - QWERTY"**, **"Hebrew - PC"**, the phonetic **"Russian -
+QWERTY"**, and **"Spanish - Legacy"**, which map differently. If you use one of
+those, or another language, generate your own.
 
 ## 1. Dump the table from your own machine
 
@@ -55,7 +64,14 @@ Copy `base` and `shift` into `keys`, and `droppedOnB` into `dropped`:
 }
 ```
 
-Four fields decide behaviour, and three of them are easy to get wrong:
+Five fields decide behaviour, and most of them are easy to get wrong:
+
+- **`script`** groups layouts that write the same alphabet. Detection works per
+  script, not per language, because nothing in the characters says which of two
+  same-script layouts produced them. Get this wrong and two layouts will offer
+  rival readings of the same text and cancel each other out under the ambiguity
+  gate, which cost Hebrew-to-English recall a fifth of its accuracy before the
+  grouping existed.
 
 - **`hasCase`** is whether the script is bicameral. Hebrew is not, so a shifted
   key there is almost always a habit artefact and decoding falls back to the
@@ -63,7 +79,9 @@ Four fields decide behaviour, and three of them are easy to get wrong:
   preserved. Setting this wrong either destroys capitals or invents them.
 - **`dropped`** lists keys that emit nothing on this layout. On the Hebrew board
   21 shifted Latin letters emit nothing, so their case is destroyed before any
-  software sees it. Russian drops nothing.
+  software sees it. Russian drops nothing. Spanish drops `[ { ' "`, which are
+  dead keys for accents: they wait for a following vowel, so they are not
+  recoverable and accented Spanish cannot be reconstructed.
 - **`letterClass`** is expanded into a literal character set. Include both cases
   for a bicameral script (`а-яёА-ЯЁ`), and do not forget the letters that sit
   outside the main range, such as `ё`.
@@ -140,4 +158,7 @@ opportunity.
 
 Adding a layout makes every existing language's job harder, because every input
 gains another candidate reading. Re-run all three gates for **every** language
-after adding one, not just the new one.
+after adding one, not just the new one. Adding Spanish is the cautionary tale: on
+its own it looked fine, while Hebrew-to-English recall had quietly fallen from
+99.4% to 77.6% and six new false positives had appeared elsewhere. Only the full
+sweep showed it.

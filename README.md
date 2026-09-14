@@ -8,13 +8,14 @@ selected.
 ksudnt                    ->  לדוגמא
 ghbdtn                    ->  привет
 руддщ                     ->  hello
+ma;ana                    ->  mañana
 ```
 
 Nothing was lost when you typed that. The keystrokes landed; only the table that
 rendered them was wrong. kbfix reads every prompt, and when it is confident the
 keys came out of the wrong layout it tells Claude how the prompt actually reads.
 
-English, Hebrew and Russian ship. Adding a language is adding a folder.
+English, Hebrew, Russian and Spanish ship. Adding a language is adding a folder.
 
 ## What it does not do
 
@@ -25,9 +26,9 @@ silently replaced your words would, on its first false positive, destroy
 something you meant.
 
 For the same reason it would rather say nothing than guess. It abstains on mixed
-scripts, on anything under four letters, and whenever the original reads about as
-well as the transposition does. With three layouts it also abstains when two
-languages read equally well, because then neither answer is safe.
+scripts, on anything under four letters, on text that is mostly punctuation, when
+two readings are equally good, and whenever the original reads about as well as
+the transposition does.
 
 ## Install
 
@@ -70,7 +71,7 @@ your project, or `~/.kbfix.json` for the whole machine. Project wins over home.
 ```json
 {
   "layouts": ["en", "he"],
-  "minTargetScore": 0.55,
+  "minTargetScore": 0.65,
   "minMargin": 0.35,
   "minCandidateGap": 0.15
 }
@@ -85,11 +86,14 @@ quieter.
 Everything is expressed against one reference keyboard, the US ANSI layout, and a
 key is named by the character that reference emits. Decoding is two hops: text
 back to the keys that were pressed, then forward into the layout that was meant.
-Three layouts give six directions and still only three tables.
+Four layouts give twelve directions and still only four tables.
 
-For each prompt it works out which alphabet the text is in, transposes it into
-every other layout, and asks whether any reading is plausible prose, clearly
-better than the text as typed, and clearly better than the runner-up.
+For each prompt it works out which **script** the text is in, transposes it into
+each other script, and asks whether any reading is plausible prose, clearly
+better than the text as typed, and clearly better than the runner-up. Script, not
+language: English and Spanish both write Latin, so nothing in the characters says
+which of them produced a string, and offering both as rival readings would just
+make them cancel out.
 
 "Reads like prose" is three channels per language. A list of the most frequent
 words scores 1 outright. A character-bigram model scores everything else on
@@ -117,11 +121,14 @@ models were trained on, 4,000 lines per sweep:
 
 | | result |
 |---|---|
-| False positives, 36,000 lines of real English, Hebrew and Russian | **0** |
+| False positives, 48,000 lines of real English, Spanish, Hebrew and Russian | **0** |
 | Caught, English typed on the Hebrew or Russian layout | 99.9% |
-| Caught, Hebrew typed on the English or Russian layout | 99.4% / 99.5% |
+| Caught, Hebrew typed on the English or Russian layout | 99.4% / 99.6% |
 | Caught, Russian typed on the English or Hebrew layout | 99.7% / 99.6% |
-| Exact decode, of those caught | **100%** |
+| Exact decode, across those three | **100%** |
+| Caught, Spanish typed on a US layout | **5.5%**, and that is the ceiling |
+
+Spanish is the odd one out, for a reason no amount of tuning changes. See below.
 
 `node scripts/kbfix.mjs --bench` is the committed gate and must stay at zero
 false positives.
@@ -141,10 +148,47 @@ All verified against the real layouts, not assumed:
   real Hebrew ("if") and layout-typed `to`.
 - **Short mistypes get missed.** `.פר` could be `/pr`, but four letters is the
   floor for having any evidence at all.
-- **The shipped tables are for the macOS "ABC", "Hebrew" and "Russian" input
-  sources.** They are wrong for "Hebrew - QWERTY", "Hebrew - PC" and the
-  phonetic "Russian - QWERTY". Generate your own with
+- **Text that is mostly punctuation is left alone.** The models only read
+  letters, so `if (a) { b(); }` offers four letters to judge on, and they spell
+  `if`, `a` and `b`. It needs letters to be at least half the non-space
+  characters.
+- **The shipped tables are for the macOS "ABC", "Hebrew", "Russian" and
+  "Spanish" input sources.** They are wrong for "Hebrew - QWERTY", "Hebrew - PC"
+  and the phonetic "Russian - QWERTY". Generate your own with
   `swift scripts/dump-layout.swift`.
+
+## Why Spanish barely works, and Hebrew and Russian do
+
+This is worth stating plainly, because it is a property of the alphabets and not
+something a better model would fix.
+
+Hebrew and Russian write **different scripts** from English. Every letter moves,
+so a wrong-layout mistake turns a sentence into visible nonsense, and every one of
+those characters is evidence. `commit and push to main` becomes
+`בםצצןא שמג פודי אם צשןמ`, and recovering it is close to certain.
+
+Spanish writes the **same script** as English and puts every letter `a` to `z` in
+the same place. Compare the two key tables and exactly **zero letters** differ.
+So a Spanish speaker on a US keyboard does not get nonsense, they get Spanish with
+one wrong character: `ma;ana` for `mañana`. There is no signal to recover except
+that single punctuation mark.
+
+What follows from that:
+
+- **`ñ` and `ç` are recoverable.** `ma;ana` reads as `mañana`, because `;` sits
+  where `ñ` does and a punctuation mark wedged inside a word is real evidence.
+- **Accented vowels are not.** `á` is a dead-key sequence, two keystrokes, and
+  this model maps single keys. `pequeno` stays `pequeno`.
+- **Correctly typed Spanish is never touched.** Transposing it changes nothing at
+  all, and no change means no evidence. Without that rule every Spanish sentence
+  would be flagged as mistyped English, since the Spanish model scores it 1.0 and
+  the English model does not.
+- **Spanish typed on a Hebrew or Russian board recovers normally,** at about 45%.
+  That is a different script, so the usual machinery applies; the shortfall is
+  accented words, which arrive as mixed script and are left alone by design.
+
+The honest summary: adding Spanish buys you `ñ`. If you never type Spanish, leave
+it out of `layouts` in your config and the detector has one less thing to weigh.
 
 ## Development
 

@@ -1,6 +1,7 @@
 {
   "lang": "he",
   "label": "Hebrew",
+  "script": "hebrew",
   "provenance": "Extracted with UCKeyTranslate on macOS against the input sources \"ABC\" and plain \"Hebrew\" (layout id -18432), 2026-08-13. Not written from memory. See layouts/README.md before editing: this table is WRONG for \"Hebrew - QWERTY\" and \"Hebrew - PC\".",
   "hasCase": false,
   "letterClass": "א-ת",

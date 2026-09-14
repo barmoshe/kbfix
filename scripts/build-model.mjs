@@ -188,6 +188,14 @@ function buildLanguage(lang, { layouts, corpora, cacheDir }) {
     const scores = [];
     for (const { word } of (corpora.get(other) || []).slice(0, CALIB_POOL)) {
       const junk = transpose(word, otherL, L);
+      // A word the key tables leave untouched is not layout junk, it is just a
+      // foreign word, and it belongs in no negative pool. Two layouts of the
+      // same script agree on every letter, so almost all of Spanish survives a
+      // transposition into English intact. Counting those as negatives poisons
+      // the calibration outright: the English bound rose above its own positive
+      // bound and separation went NEGATIVE (-0.2), which is the builder saying
+      // the model can no longer tell the language from its own junk.
+      if (junk === word) continue;
       if (junk.length < 2) continue;
       let pure = true;
       for (const ch of junk) if (!L.letters.has(ch)) { pure = false; break; }

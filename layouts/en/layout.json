@@ -1,6 +1,7 @@
 {
   "lang": "en",
   "label": "English",
+  "script": "latin",
   "note": "The REFERENCE layout (macOS \"ABC\"). Every other layout's key table is expressed against it, so it carries no table itself. Replace this only if you dump the other layouts against a different reference board.",
   "reference": true,
   "hasCase": true,

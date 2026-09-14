@@ -77,6 +77,59 @@
       "why": "real Russian, never touch it"
     },
     {
+      "input": "ma;ana",
+      "expect": "mañana",
+      "direction": "en->es",
+      "why": "the ONLY kind of Spanish mistype there is: the ñ key is where ; sits on a US board, so the letters are all fine and one punctuation mark is wrong"
+    },
+    {
+      "input": "ma;ana por la ma;ana",
+      "expect": "mañana por la mañana",
+      "direction": "en->es",
+      "why": "same, in a sentence"
+    },
+    {
+      "input": "el ni;o pequeno",
+      "expect": "el niño pequeno",
+      "direction": "en->es",
+      "why": "pequeño keeps its missing tilde: an accented vowel is a dead-key sequence and is not recoverable, only ñ is"
+    },
+    {
+      "input": "hola que tal amigo",
+      "expect": null,
+      "why": "correctly typed Spanish. Transposing it changes NOTHING, so there is no evidence of a mistake. Without that guard every Spanish sentence would be flagged as mistyped English"
+    },
+    {
+      "input": "muchas gracias por todo",
+      "expect": null,
+      "why": "correctly typed Spanish, unchanged by transposition"
+    },
+    {
+      "input": "el niño pequeño",
+      "expect": null,
+      "why": "already correct, ñ and all"
+    },
+    {
+      "input": "const x = 1;",
+      "expect": null,
+      "why": "a trailing semicolon is not a glued letter; code must survive a Spanish layout being installed"
+    },
+    {
+      "input": "for (i=0; i<10; i++)",
+      "expect": null,
+      "why": "semicolons followed by spaces, not wedged inside words"
+    },
+    {
+      "input": "npm run build; npm test",
+      "expect": null,
+      "why": "shell separator, not a lost ñ"
+    },
+    {
+      "input": "src/utils/foo.ts",
+      "expect": null,
+      "why": "slashes and dots sit inside words but do not become letters on any layout, so they are not evidence"
+    },
+    {
       "input": "תודה רבה על העזרה",
       "expect": null,
       "why": "real Hebrew, never touch it"

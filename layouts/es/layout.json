@@ -1,0 +1,121 @@
+{
+  "lang": "es",
+  "label": "Spanish",
+  "script": "latin",
+  "provenance": "Extracted with UCKeyTranslate on macOS against the input sources \"ABC\" and \"Spanish\" (the ISO board), 2026-09-14, by scripts/dump-layout.swift. Not written from memory.",
+  "warning": "Spanish shares the Latin script with English and puts EVERY letter a-z in the same place. Only punctuation moves, so a wrong-layout mistake here mangles punctuation and nothing else: ma;ana for mañana. Recovery is possible only when the text contains one of the keys that differ, and impossible for accented vowels, which are dead-key sequences this model does not represent.",
+  "hasCase": true,
+  "letterClass": "A-Za-zñÑçÇáéíóúÁÉÍÓÚüÜ",
+  "vowels": "aeiouyáéíóúü",
+  "keys": [
+    [
+      "§",
+      "º"
+    ],
+    [
+      "=",
+      "¡"
+    ],
+    [
+      "-",
+      "'"
+    ],
+    [
+      "]",
+      "+"
+    ],
+    [
+      ";",
+      "ñ"
+    ],
+    [
+      "\\",
+      "ç"
+    ],
+    [
+      "/",
+      "-"
+    ],
+    [
+      "`",
+      "<"
+    ],
+    [
+      ".",
+      ","
+    ],
+    [
+      "±",
+      "ª"
+    ],
+    [
+      "@",
+      "\""
+    ],
+    [
+      "#",
+      "·"
+    ],
+    [
+      "^",
+      "&"
+    ],
+    [
+      "+",
+      "¿"
+    ],
+    [
+      "(",
+      ")"
+    ],
+    [
+      "&",
+      "/"
+    ],
+    [
+      "_",
+      "?"
+    ],
+    [
+      "*",
+      "("
+    ],
+    [
+      ")",
+      "="
+    ],
+    [
+      "}",
+      "*"
+    ],
+    [
+      ":",
+      "Ñ"
+    ],
+    [
+      "|",
+      "Ç"
+    ],
+    [
+      "<",
+      ";"
+    ],
+    [
+      "?",
+      "_"
+    ],
+    [
+      ">",
+      ":"
+    ],
+    [
+      "~",
+      ">"
+    ],
+    [
+      ".",
+      ","
+    ]
+  ],
+  "dropped": "[{'\""
+}

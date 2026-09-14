@@ -72,6 +72,10 @@ export function compileLayout(raw) {
   return {
     lang: raw.lang,
     label: raw.label,
+    // Two layouts can share a script (English and Spanish both write Latin).
+    // When they do, nothing in the text says which one produced it, so both
+    // have to be tried as the source.
+    script: raw.script || raw.lang,
     reference: !!raw.reference,
     // A unicameral script has no capitals to preserve, so a shifted key that
     // emits some decorated variant is almost always a habit artifact rather
@@ -147,13 +151,23 @@ export function transpose(text, from, to, opts = {}) {
   return fromKeys(toKeys(text, from), to, opts);
 }
 
-/** Which layouts' alphabets appear in the text, and how often. */
+/**
+ * Which SCRIPTS appear in the text, and how often.
+ *
+ * Scripts, not layouts: the characters tell you the alphabet, never which of
+ * several same-script layouts produced them.
+ */
 export function scriptCounts(text, layouts) {
-  const counts = new Map();
-  for (const lang of layouts.keys()) counts.set(lang, 0);
+  const letters = new Map(); // script -> set of its characters
+  for (const L of layouts.values()) {
+    if (!letters.has(L.script)) letters.set(L.script, new Set());
+    const set = letters.get(L.script);
+    for (const ch of L.letters) set.add(ch);
+  }
+  const counts = new Map([...letters.keys()].map((s) => [s, 0]));
   for (const ch of text) {
-    for (const [lang, L] of layouts) {
-      if (L.letters.has(ch)) { counts.set(lang, counts.get(lang) + 1); break; }
+    for (const [script, set] of letters) {
+      if (set.has(ch)) { counts.set(script, counts.get(script) + 1); break; }
     }
   }
   return counts;

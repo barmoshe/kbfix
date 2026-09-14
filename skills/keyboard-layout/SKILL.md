@@ -12,9 +12,16 @@ typed while Hebrew is selected arrives as `בםצצןא שמג פודי אם צ�
 typed while English is selected arrives as `ksudnt`, and `привет` arrives as
 `ghbdtn`. Nothing is lost except the rendering, so all of it is recoverable.
 
-English, Hebrew and Russian ship. Everything is expressed against one reference
-keyboard (US ANSI), so decoding is two hops: text back to the keys that were
-pressed, then forward into the layout that was meant.
+English, Hebrew, Russian and Spanish ship. Everything is expressed against one
+reference keyboard (US ANSI), so decoding is two hops: text back to the keys that
+were pressed, then forward into the layout that was meant.
+
+**Spanish is a special case worth knowing before you promise anything.** It
+shares the Latin script with English and puts every letter in the same place, so
+a wrong-layout mistake there mangles punctuation and nothing else. `ma;ana` is
+recoverable as `mañana` because `;` is where `ñ` lives. Accented vowels are dead
+keys and are gone for good, and correctly typed Spanish is untouched because
+transposing it changes nothing.
 
 A `UserPromptSubmit` hook already handles the common case: when it is confident
 it annotates the prompt with the reading, and otherwise it stays silent. Reach
@@ -75,13 +82,17 @@ before trusting it.
 
 ## When to abstain
 
-The tool refuses rather than guesses in four cases, and you should too:
+The tool refuses rather than guesses in these cases, and you should too:
 
 - **Mixed scripts.** `commit and push לmain` is left alone. Half-decoding is
   worse than not decoding, because short words are ambiguous: `אם` is at once
   real Hebrew ("if") and layout-typed `to`.
-- **Two layouts read equally well.** Latin input could be intended Hebrew or
+- **Two readings score equally well.** Latin input could be intended Hebrew or
   intended Russian. When neither wins clearly, no answer is safe.
+- **Transposing changes nothing.** Between two layouts of the same script there
+  is simply no evidence, which is why correctly typed Spanish is never touched.
+- **Mostly punctuation.** The scorer reads only letters, so `if (a) { b(); }`
+  offers almost nothing to judge.
 - **Under four signal letters.** `.פר` could be `/pr`, but there is not enough
   evidence. Ask.
 - **The original reads about as well as the transposition.** No call is safe.

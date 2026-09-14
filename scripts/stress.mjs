@@ -103,10 +103,14 @@ function recall(from, to, pool, lo, hi) {
     if (r.confident) {
       caught += 1;
       if (r.decoded === intended) exact += 1;
+      // Only a misattribution that also got the TEXT wrong is worth flagging.
+      // Which of two same-script layouts produced a string is often undecidable
+      // (English and Spanish differ on punctuation alone), and when the reading
+      // comes out right anyway the label costs nothing.
       else if (r.direction !== `${to}->${from}`) wrongLayout += 1;
     }
   }
-  const tag = wrongLayout ? `  WRONG LAYOUT ${wrongLayout}` : '';
+  const tag = wrongLayout ? `  inexact+misattributed ${wrongLayout}` : '';
   console.log(`  ${`${from} typed on the ${to} layout`.padEnd(44)} ${String(caught).padStart(5)}/${n}  ${((caught / n) * 100).toFixed(1)}%  exact ${exact}/${caught}${tag}`);
   return wrongLayout;
 }

@@ -60,7 +60,15 @@
         "export NODE_ENV=production",
         "rm -rf node_modules && npm ci",
         "xcrun simctl list devices",
-        "ffmpeg -i in.mp4 -vf scale=720:-1 out.mp4"
+        "ffmpeg -i in.mp4 -vf scale=720:-1 out.mp4",
+        "const x = 1;",
+        "for (i=0; i<10; i++)",
+        "npm run build; npm test",
+        "a=1; b=2; print(a+b)",
+        "import x from \"y\";",
+        "if (a) { b(); }",
+        "SELECT * FROM t WHERE id=1;",
+        "echo hi; echo bye"
       ]
     },
     {
@@ -111,6 +119,31 @@
         "я не понял ответ",
         "открой настройки проекта",
         "сделай кнопку больше"
+      ]
+    },
+    {
+      "label": "real Spanish prompts (share the Latin script with English)",
+      "lines": [
+        "hola que tal amigo",
+        "muchas gracias por todo",
+        "el niño pequeño juega",
+        "mañana por la mañana",
+        "puedes revisar este archivo",
+        "no funciona en mi ordenador",
+        "vamos a empezar de nuevo",
+        "que esta pasando aqui",
+        "añade otro boton por favor",
+        "ejecuta las pruebas otra vez",
+        "enviame el enlace",
+        "quiero cambiar el color",
+        "escribe un resumen corto",
+        "seguimos mañana con esto",
+        "ahora todo funciona bien",
+        "explicame lo que hiciste",
+        "hay que corregir este error",
+        "donde guardaste el archivo",
+        "muy bien, continua",
+        "no entendi la respuesta"
       ]
     },
     {
