@@ -1,0 +1,17 @@
+{
+  "_": "Copy this to .kbfix.json in your project, or to ~/.kbfix.json for the whole machine. Project wins over home. Every field is optional; what is shown here is the default.",
+
+  "pair": "en-he",
+
+  "_directions": "Which way round to look. Drop one to switch that direction off, for example [\"he->en\"] to detect only English typed on the Hebrew layout. The generic aliases \"b->a\" and \"a->b\" work for any pair.",
+  "directions": ["he->en", "en->he"],
+
+  "_minSignalChars": "Below this many letters there is not enough evidence either way, so it says nothing. Lowering it will start guessing at things like /pr.",
+  "minSignalChars": 4,
+
+  "_minTargetScore": "How much the transposed text has to read like real prose, 0 to 1.",
+  "minTargetScore": 0.55,
+
+  "_minMargin": "How far the transposition has to beat the original. This is the gate that keeps ordinary prompts safe, because real prose scores near 1 in its own language and nothing can beat it by this much. Raising either threshold makes it quieter; lowering them makes it guess.",
+  "minMargin": 0.35
+}

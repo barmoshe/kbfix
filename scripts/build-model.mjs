@@ -1,0 +1,249 @@
+#!/usr/bin/env node
+/**
+ * build-model - regenerate a layout pair's scoring model. DEVELOPMENT ONLY.
+ *
+ * This is the only part of kbfix that touches the network, and it never runs at
+ * prompt time. It reads the frequency corpora named in layouts/<pair>/corpus.json
+ * and writes layouts/<pair>/model.json, which is committed.
+ *
+ *   node scripts/build-model.mjs --pair en-he
+ *   node scripts/build-model.mjs --pair en-he --cache ~/.cache/kbfix
+ *
+ * What it produces, per side of the pair:
+ *
+ *   words   the N most frequent words, the strong signal
+ *   logp    a character-bigram log-probability table, the fallback signal for
+ *           everything not in `words` - this is what lets `ksudnt` be recognised
+ *           as `לדוגמא` even though לדוגמא is nobody's stopword
+ *   calib   the two bounds that map a mean bigram log-probability onto 0..1
+ *
+ * The calibration is the interesting part. The negative examples are not random
+ * strings: they are the OTHER language's real words pushed through this very
+ * layout table, which is exactly the distribution the detector has to reject.
+ */
+
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { loadLayout, LAYOUTS_DIR, toA, toB, expandLetterClass } from './lib/layout.mjs';
+
+const WORDLIST_N = 5000;      // words that score 1.0 outright
+const CALIB_POOL = 30000;     // how many words each calibration pool draws
+const ALPHA = 0.5;            // Laplace smoothing on the bigram counts
+const BOUNDARY = 0;           // index of the word-boundary symbol
+
+function arg(name, fallback = null) {
+  const i = process.argv.indexOf(`--${name}`);
+  return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
+}
+
+function fetchCorpus(url, cacheDir) {
+  mkdirSync(cacheDir, { recursive: true });
+  const file = join(cacheDir, url.split('/').pop());
+  if (existsSync(file)) {
+    console.log(`  cached  ${file}`);
+    return file;
+  }
+  console.log(`  fetch   ${url}`);
+  execFileSync('curl', ['-sSL', '--max-time', '180', '-o', file, url], { stdio: 'inherit' });
+  return file;
+}
+
+/** Read a "<word><sep><count>" corpus, keeping only words made of `letters`. */
+function readCorpus(file, separator, letters) {
+  const out = [];
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    if (!line) continue;
+    const at = line.indexOf(separator);
+    if (at < 0) continue;
+    const word = line.slice(0, at).trim();
+    const freq = Number(line.slice(at + 1).trim());
+    if (!word || !Number.isFinite(freq) || freq <= 0) continue;
+    let ok = word.length > 0;
+    for (const ch of word) if (!letters.has(ch)) { ok = false; break; }
+    if (ok) out.push({ word, freq });
+  }
+  out.sort((x, y) => y.freq - x.freq);
+  return out;
+}
+
+/**
+ * Bigram log-probabilities over [boundary, ...letters].
+ *
+ * Words are weighted by log(1 + freq), not by raw frequency: the goal is a model
+ * of what the language's spelling looks like, and raw counts would let the top
+ * twenty function words drown out every other pattern in the language.
+ */
+function trainBigrams(corpus, alphabet) {
+  const n = alphabet.length + 1;
+  const index = new Map(alphabet.map((ch, i) => [ch, i + 1]));
+  const counts = new Float64Array(n * n);
+
+  for (const { word, freq } of corpus) {
+    const w = Math.log(1 + freq);
+    let prev = BOUNDARY;
+    for (const ch of word) {
+      const cur = index.get(ch);
+      if (cur === undefined) { prev = BOUNDARY; continue; }
+      counts[prev * n + cur] += w;
+      prev = cur;
+    }
+    counts[prev * n + BOUNDARY] += w;
+  }
+
+  const logp = new Array(n * n).fill(0);
+  for (let i = 0; i < n; i += 1) {
+    let total = 0;
+    for (let j = 0; j < n; j += 1) total += counts[i * n + j];
+    const denom = total + ALPHA * n;
+    for (let j = 0; j < n; j += 1) {
+      logp[i * n + j] = round(Math.log((counts[i * n + j] + ALPHA) / denom), 4);
+    }
+  }
+  return { index, n, logp };
+}
+
+/** Mean bigram log-probability of one word. Higher (closer to 0) is more word-like. */
+function meanLogp(word, { index, n, logp }) {
+  let prev = BOUNDARY;
+  let sum = 0;
+  let steps = 0;
+  for (const ch of word) {
+    const cur = index.get(ch);
+    if (cur === undefined) continue;
+    sum += logp[prev * n + cur];
+    prev = cur;
+    steps += 1;
+  }
+  if (steps === 0) return -Infinity;
+  sum += logp[prev * n + BOUNDARY];
+  return sum / (steps + 1);
+}
+
+function percentile(sorted, p) {
+  if (sorted.length === 0) return 0;
+  const i = Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))));
+  return sorted[i];
+}
+
+const round = (x, d) => Math.round(x * 10 ** d) / 10 ** d;
+
+/**
+ * The bigram table is trained on a cleaner subset than the word list is drawn
+ * from. A raw web-frequency corpus is mostly not the language it claims to be,
+ * and training on that noise makes the model permissive enough to accept the
+ * other language pushed through the layout table. Filtering only the training
+ * set keeps domain words (github, npm, json) in the word list where they belong.
+ */
+function trainingSubset(corpus, spec) {
+  if (spec.trainFilterFile && existsSync(spec.trainFilterFile)) {
+    const allow = new Set(readFileSync(spec.trainFilterFile, 'utf8').toLowerCase().split('\n').map((s) => s.trim()));
+    const kept = corpus.filter((e) => allow.has(e.word));
+    if (kept.length >= 5000) {
+      console.log(`      training on ${kept.length} of ${corpus.length} (filtered by ${spec.trainFilterFile})`);
+      return kept;
+    }
+    console.log(`      filter ${spec.trainFilterFile} kept only ${kept.length}; ignoring it`);
+  }
+  if (spec.trainMaxWords && corpus.length > spec.trainMaxWords) {
+    console.log(`      training on the top ${spec.trainMaxWords} of ${corpus.length}`);
+    return corpus.slice(0, spec.trainMaxWords);
+  }
+  return corpus;
+}
+
+function buildSide({ label, corpus, otherCorpus, letters, transposeIn, spec, extraWords = [] }) {
+  const alphabet = [...letters];
+  const trainCorpus = trainingSubset(corpus, spec);
+  const model = trainBigrams(trainCorpus, alphabet);
+
+  // Positives: real words this language has that are NOT in the word list, since
+  // in-list words never reach the bigram channel anyway.
+  const positives = trainCorpus
+    .slice(WORDLIST_N, WORDLIST_N + CALIB_POOL)
+    .map((e) => meanLogp(e.word, model))
+    .filter(Number.isFinite)
+    .sort((x, y) => x - y);
+
+  // Negatives: the other language's real words pushed through the layout table.
+  const negatives = [];
+  for (const { word } of otherCorpus.slice(0, CALIB_POOL)) {
+    const junk = transposeIn(word);
+    if (junk.length < 2) continue;
+    let pure = true;
+    for (const ch of junk) if (!letters.has(ch)) { pure = false; break; }
+    if (!pure) continue;
+    const m = meanLogp(junk, model);
+    if (Number.isFinite(m)) negatives.push(m);
+  }
+  negatives.sort((x, y) => x - y);
+
+  const lo = round(percentile(negatives, 0.80), 4);
+  const hi = round(percentile(positives, 0.40), 4);
+
+  console.log(`      positives  p40 ${hi}  (median ${round(percentile(positives, 0.5), 2)}, n=${positives.length})`);
+  console.log(`      negatives  p80 ${lo}  (median ${round(percentile(negatives, 0.5), 2)}, n=${negatives.length})`);
+  console.log(`      separation ${round(hi - lo, 2)}`);
+  if (hi <= lo) console.log('      WARNING: the two pools do not separate; scores will be uninformative');
+
+  const words = [...new Set([...corpus.slice(0, WORDLIST_N).map((e) => e.word), ...extraWords])].sort();
+  return {
+    alphabet: alphabet.join(''),
+    words,
+    logp: model.logp,
+    calib: { lo, hi },
+  };
+}
+
+function main() {
+  const pair = arg('pair', 'en-he');
+  const cacheDir = arg('cache', join(process.env.HOME || '.', '.cache', 'kbfix'));
+  const dir = join(LAYOUTS_DIR, pair);
+  const L = loadLayout(pair);
+  const spec = JSON.parse(readFileSync(join(dir, 'corpus.json'), 'utf8'));
+
+  console.log(`kbfix build-model: ${pair}`);
+
+  const aLetters = new Set(expandLetterClass(L.a.letterClass.toLowerCase()));
+  const bLetters = L.bLetters;
+
+  const fileA = arg('corpus-a') || fetchCorpus(spec.a.url, cacheDir);
+  const fileB = arg('corpus-b') || fetchCorpus(spec.b.url, cacheDir);
+  const corpusA = readCorpus(fileA, spec.a.separator, aLetters);
+  const corpusB = readCorpus(fileB, spec.b.separator, bLetters);
+
+  const extraFile = join(dir, 'extra-words.json');
+  const extra = existsSync(extraFile) ? JSON.parse(readFileSync(extraFile, 'utf8')) : { a: [], b: [] };
+
+  const model = {
+    generated: new Date().toISOString().slice(0, 10),
+    pair,
+    wordlistSize: WORDLIST_N,
+    sources: { a: spec.a.url, b: spec.b.url },
+    a: buildSide({
+      label: L.a.label,
+      corpus: corpusA,
+      otherCorpus: corpusB,
+      letters: aLetters,
+      transposeIn: (w) => toA(w, L),
+      spec: spec.a,
+      extraWords: extra.a,
+    }),
+    b: buildSide({
+      label: L.b.label,
+      corpus: corpusB,
+      otherCorpus: corpusA,
+      letters: bLetters,
+      transposeIn: (w) => toB(w, L),
+      spec: spec.b,
+      extraWords: extra.b,
+    }),
+  };
+
+  const out = join(dir, 'model.json');
+  writeFileSync(out, `${JSON.stringify(model)}\n`);
+  const kb = Math.round(readFileSync(out).length / 1024);
+  console.log(`  wrote   ${out} (${kb} KB)`);
+}
+
+main();

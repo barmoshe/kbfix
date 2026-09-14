@@ -1,0 +1,12 @@
+{
+  "name": "kbfix",
+  "description": "Single-plugin marketplace for the kbfix plugin.",
+  "owner": { "name": "Bar Moshe" },
+  "plugins": [
+    {
+      "name": "kbfix",
+      "description": "Recover text typed with the wrong keyboard layout selected. Annotates the prompt with how it actually reads, never rewrites it. English/Hebrew by default, pluggable layout pairs.",
+      "source": "./"
+    }
+  ]
+}

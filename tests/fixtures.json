@@ -1,0 +1,49 @@
+{
+  "note": "Behaviour fixtures for the en-he pair. `expect: null` means the detector must abstain. Add a case here whenever a miss or a false positive bites you; --self-test is the regression gate.",
+  "cases": [
+    {
+      "input": "בםצצןא שמג פודי אם צשןמ",
+      "expect": "commit and push to main",
+      "direction": "he->en",
+      "why": "ground truth: a real mistyped message, confirmed by the person who typed it"
+    },
+    {
+      "input": "ךקא'ד גם ןא",
+      "expect": "let's do it",
+      "direction": "he->en",
+      "why": "punctuation shifts too: ' arrives as a comma"
+    },
+    {
+      "input": "ksudnt",
+      "expect": "לדוגמא",
+      "direction": "en->he",
+      "why": "the reverse direction, and a word no stopword list contains: this is what the bigram channel exists for"
+    },
+    {
+      "input": "akuo",
+      "expect": "שלום",
+      "direction": "en->he",
+      "why": "short but unambiguous once transposed"
+    },
+    {
+      "input": ",usv rcv",
+      "expect": "תודה רבה",
+      "direction": "en->he",
+      "why": "leading comma is the ' key; two real Hebrew words"
+    },
+
+    { "input": "תודה רבה על העזרה", "expect": null, "why": "real Hebrew, never touch it" },
+    { "input": "היי דן מה המצב", "expect": null, "why": "real Hebrew, never touch it" },
+    { "input": "אני צריך לבדוק את הקובץ הזה", "expect": null, "why": "real Hebrew, never touch it" },
+
+    { "input": "commit and push to main", "expect": null, "why": "real English, never touch it" },
+    { "input": "can you check the hook please", "expect": null, "why": "real English, never touch it" },
+
+    { "input": "בנאשמג פודי", "expect": null, "why": "near-gibberish both ways, no call is safe" },
+    { "input": "אם", "expect": null, "why": "two letters: both real Hebrew ('if') and layout-typed 'to'" },
+    { "input": "ok", "expect": null, "why": "under the signal-character floor" },
+    { "input": "12:00", "expect": null, "why": "digits are identical in both layouts and carry no direction" },
+    { "input": "commit and push לmain", "expect": null, "why": "mixed script: half-decoding is worse than not decoding" },
+    { "input": "", "expect": null, "why": "empty input" }
+  ]
+}

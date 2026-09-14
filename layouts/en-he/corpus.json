@@ -1,0 +1,17 @@
+{
+  "note": "Where the scoring model comes from. Only scripts/build-model.mjs reads this, and only when you regenerate model.json. The runtime never fetches anything.",
+  "a": {
+    "url": "https://norvig.com/ngrams/count_1w.txt",
+    "separator": "\t",
+    "credit": "Peter Norvig, word counts from the Google Web Trillion Word Corpus.",
+    "trainFilterFile": "/usr/share/dict/words",
+    "trainMaxWords": 40000,
+    "trainFilterWhy": "These are raw web tokens, so roughly four fifths of them are not English. Training the bigram table on all of it makes the model permissive enough to accept Hebrew pushed through the layout: intersecting with the system dictionary widens the separation from 0.56 to 0.92. The filter only affects bigram training, never the word list, so github and npm stay recognised. If the file is absent the builder falls back to trainMaxWords."
+  },
+  "b": {
+    "url": "https://raw.githubusercontent.com/eyaler/hebrew_wordlists/master/cc100_intersect_with_fatverb_with_some_prefixes.csv",
+    "separator": ",",
+    "credit": "eyaler/hebrew_wordlists, CC-100 frequencies intersected with the hspell dictionary, inflected forms with attached prefixes included.",
+    "trainFilterWhy": "No filter needed: this corpus is already intersected with hspell, so it is dictionary-clean as downloaded. Use the WITH-PREFIXES variant: Hebrew attaches ל ב ו ה ש מ כ directly to the word, so a base-form list misses most of what real text actually contains (לדוגמה is absent from the base list and rank 1987 with prefixes)."
+  }
+}

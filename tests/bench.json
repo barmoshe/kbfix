@@ -1,0 +1,116 @@
+{
+  "note": "Every line here must be left ALONE. With both directions live, any ordinary prompt is a detection candidate, so this corpus is what decides whether the thing is shippable. A hit here is a bug, not a tuning opportunity. Identifier-heavy prompts are the real risk: they score badly as English, which is exactly the condition a false positive needs.",
+  "quiet": [
+    {
+      "label": "ordinary English prompts",
+      "lines": [
+        "can you check the hook please",
+        "commit and push to main",
+        "what does this function do",
+        "add a test for the empty case",
+        "why is this failing",
+        "run the tests again",
+        "explain the error above",
+        "make the button bigger",
+        "fix the typo in the readme",
+        "show me the diff",
+        "revert that last change",
+        "open a pull request when you are done",
+        "this is still broken after the fix",
+        "where is the config file",
+        "summarise what changed today",
+        "the build passes locally but not in ci",
+        "write the migration and run it",
+        "split this into two commits",
+        "rename it to something clearer",
+        "keep going",
+        "ok thanks that worked",
+        "no stop, undo it",
+        "try a different approach",
+        "what are the tradeoffs here"
+      ]
+    },
+    {
+      "label": "identifier and code heavy English",
+      "lines": [
+        "npm run dev",
+        "git rebase -i HEAD~3",
+        "src/utils/foo.ts is wrong",
+        "useEffect deps array",
+        "the useMemo hook rerenders",
+        "check pkg.json exports",
+        "grep -rn TODO src",
+        "psql -c 'select 1'",
+        "chmod +x scripts/build.sh",
+        "kubectl get pods -n prod",
+        "docker compose up -d",
+        "tsconfig strict mode",
+        "eslint no-unused-vars",
+        "vitest --run --reporter dot",
+        "gh pr create --fill",
+        "mkdir -p dist/assets",
+        "cd ../sibling && ls",
+        "ssh deploy@host tail -f log",
+        "awk '{print $2}' out.txt",
+        "sed -i '' s/foo/bar/g",
+        "curl -sS localhost:3000/api",
+        "node --experimental-vm-modules",
+        "pnpm dlx tsx watch",
+        "brew install jq",
+        "export NODE_ENV=production",
+        "rm -rf node_modules && npm ci",
+        "xcrun simctl list devices",
+        "ffmpeg -i in.mp4 -vf scale=720:-1 out.mp4"
+      ]
+    },
+    {
+      "label": "real Hebrew prompts",
+      "lines": [
+        "תודה רבה על העזרה",
+        "היי דן מה המצב",
+        "אני צריך לבדוק את הקובץ הזה",
+        "תוכל לעדכן את הדף הראשי",
+        "יש לי בעיה עם ההתקנה",
+        "בוא נתחיל מחדש",
+        "מה קורה כאן",
+        "אפשר להוסיף כפתור נוסף",
+        "זה לא עובד אצלי",
+        "תריץ את הבדיקות שוב",
+        "שלח לי את הקישור בבקשה",
+        "אני רוצה לשנות את הצבע",
+        "כתוב לי סיכום קצר",
+        "מחר נמשיך עם זה",
+        "הכל תקין עכשיו",
+        "תסביר לי מה עשית",
+        "צריך לתקן את השגיאה הזאת",
+        "איפה שמרת את הקובץ",
+        "בסדר גמור, תמשיך",
+        "לא הבנתי את התשובה"
+      ]
+    },
+    {
+      "label": "too little signal, or no direction at all",
+      "lines": [
+        "ok",
+        "12:00",
+        "3.14159",
+        "y",
+        "no",
+        "אם",
+        "?!",
+        "2026-09-14",
+        "v1.2.3",
+        "#4271"
+      ]
+    },
+    {
+      "label": "mixed script, left alone by design",
+      "lines": [
+        "commit and push ל main",
+        "תבדוק את ה readme",
+        "הקובץ src/app.tsx לא נטען",
+        "run the build ואז תשלח לי"
+      ]
+    }
+  ]
+}

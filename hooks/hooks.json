@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/kb-layout.sh",
+            "timeout": 10,
+            "statusMessage": "kbfix: checking the keyboard layout"
+          }
+        ]
+      }
+    ]
+  }
+}
