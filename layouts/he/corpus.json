@@ -1,0 +1,7 @@
+{
+  "url": "https://raw.githubusercontent.com/eyaler/hebrew_wordlists/master/cc100_intersect_with_fatverb_with_some_prefixes.csv",
+  "separator": ",",
+  "credit": "eyaler/hebrew_wordlists, CC-100 frequencies intersected with the hspell dictionary, inflected forms with attached prefixes included.",
+  "trainFilterWhy": "No filter needed: this corpus is already intersected with hspell, so it is dictionary-clean as downloaded. Use the WITH-PREFIXES variant: Hebrew attaches ל ב ו ה ש מ כ directly to the word, so a base-form list misses most of what real text actually contains (לדוגמה is absent from the base list and rank 1987 with prefixes).",
+  "note": "Where the scoring model comes from. Only scripts/build-model.mjs reads this, and only when you regenerate model.json. The runtime never fetches anything."
+}

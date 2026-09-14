@@ -1,22 +1,31 @@
-# Layout pairs
+# Layouts
 
-A layout pair is data. Adding one means adding a folder here, not editing any
-code. The engine reads whichever pair `.kbfix.json` names.
+A layout is data. Adding a language means adding a folder here, not editing any
+code.
 
 ```
-layouts/<pair-id>/
-  layout.json    the key table: what each physical key produces on each side
-  corpus.json    where the scoring model's frequency corpora come from
-  extra-words.json  optional hand-curated vocabulary merged into the word lists
-  model.json     generated, committed: word lists, bigram tables, calibration
+layouts/<lang>/
+  layout.json       what every physical key emits on that input source
+  corpus.json       where the scoring model's frequency corpus comes from
+  extra-words.json  optional hand-curated vocabulary merged into the word list
+  model.json        generated, committed: word list, bigram table, calibration
 ```
 
-## The shipped pair is not universal
+Everything is expressed against one **reference keyboard**, the US ANSI layout
+(`layouts/en/`), and a key is named by the character that reference emits. So
+decoding is two hops: text back to the keys that were pressed, then forward into
+the layout that was meant. Three layouts give six directions and still only
+three folders. There is no table of pairs.
 
-`en-he` was extracted from the macOS input sources **"ABC"** and plain
-**"Hebrew"**. It is wrong for **"Hebrew - QWERTY"** and **"Hebrew - PC"**, which
-map differently. If you use one of those, or any other pair of languages,
-generate your own.
+Shipped: English (the reference), Hebrew, Russian.
+
+## The shipped tables are not universal
+
+They were extracted from the macOS input sources **"ABC"**, **"Hebrew"** and
+**"Russian"** (the standard ЙЦУКЕН board). They are wrong for **"Hebrew -
+QWERTY"**, **"Hebrew - PC"**, and the phonetic **"Russian - QWERTY"**, which map
+completely differently. If you use one of those, or another language, generate
+your own.
 
 ## 1. Dump the table from your own machine
 
@@ -24,87 +33,111 @@ Do not write the table from memory. Ask the operating system what the keys
 actually do:
 
 ```bash
-swift scripts/dump-layout.swift --list                       # what you have installed
-swift scripts/dump-layout.swift "ABC" "Hebrew" --json        # the table
+swift scripts/dump-layout.swift --list                     # what you have installed
+swift scripts/dump-layout.swift "ABC" "Russian" --json     # the table
 ```
 
 macOS only. It calls `UCKeyTranslate` against both layouts' real keyboard data
 over every keycode and prints the keys where they disagree. Keys that agree are
-absent by design: they carry no directional signal, so a digit-heavy string is
-genuinely undecidable no matter how good the scorer is.
+absent by design: they carry no directional signal, which is why a digit-heavy
+string is undecidable no matter how good the scorer is.
 
-Copy `base`, `shift` and `droppedOnB` into your `layout.json`, and fill in the
-rest:
+Copy `base` and `shift` into `keys`, and `droppedOnB` into `dropped`:
 
 ```json
 {
-  "id": "en-ru",
-  "a": { "lang": "en", "label": "English", "letterClass": "A-Za-z", "vowels": "aeiouy" },
-  "b": { "lang": "ru", "label": "Russian", "letterClass": "а-я", "finalForms": [] }
+  "lang": "ru",
+  "label": "Russian",
+  "hasCase": true,
+  "letterClass": "а-яёА-ЯЁ",
+  "keys": [["q", "й"], ["w", "ц"], "..."],
+  "dropped": ""
 }
 ```
 
-`letterClass` is expanded into a literal character set, so ranges and single
-characters both work. `vowels` and `finalForms` are optional: they drive the
-structural rules, which cap a token's score when a near-decisive tell fires (a
-vowel-less run in English, a final form away from the end of a Hebrew word). A
-side that declares neither simply relies on the word list and bigrams.
+Four fields decide behaviour, and three of them are easy to get wrong:
+
+- **`hasCase`** is whether the script is bicameral. Hebrew is not, so a shifted
+  key there is almost always a habit artefact and decoding falls back to the
+  unshifted letter. Russian is, so `Shift+K` really is `Л` and the capital is
+  preserved. Setting this wrong either destroys capitals or invents them.
+- **`dropped`** lists keys that emit nothing on this layout. On the Hebrew board
+  21 shifted Latin letters emit nothing, so their case is destroyed before any
+  software sees it. Russian drops nothing.
+- **`letterClass`** is expanded into a literal character set. Include both cases
+  for a bicameral script (`а-яёА-ЯЁ`), and do not forget the letters that sit
+  outside the main range, such as `ё`.
+- **`finalForms`** and **`vowels`** are optional and drive the structural rule: a
+  final form away from the end of a word (Hebrew), or a vowel-less run
+  (English). Declare neither and the language relies on its word list and
+  bigrams, which is what Russian does.
 
 Two things to check in the dump before trusting it:
 
-- **Order decides collisions.** The reverse map takes the first side-a key
-  listed for a given side-b character. On `en-he`, `C` and `K` both emit `לֹ` and
-  `C` is listed first, so `לֹ` decodes to `c`.
-- **`droppedOnB` may include non-letters.** The dumper reports every key with no
-  output on side b, which on a Mac includes `§` and `±`. Keeping only the
-  letters is what the shipped table does.
+- **Order decides collisions,** in both directions, first entry wins. On the
+  Hebrew board `C` and `K` both emit `לֹ` and `C` is listed first, so `לֹ`
+  recovers as `c`. On the Russian board two physical keys both read as `.` on
+  the reference board, emitting `ю` and `,`; the first is the one people mean.
+- **`dropped` may include non-letters.** The dumper reports every key with no
+  output, which on a Mac includes `§` and `±`. Keep only the letters.
 
 ## 2. Build the scoring model
 
-Name two frequency corpora in `corpus.json`, one per side, each a plain
-`word<separator>count` file:
+Name a frequency corpus in `corpus.json`, a plain `word<separator>count` file:
 
 ```json
 {
-  "a": { "url": "...", "separator": "\t", "trainFilterFile": "/usr/share/dict/words", "trainMaxWords": 40000 },
-  "b": { "url": "...", "separator": "," }
+  "url": "https://...",
+  "separator": " ",
+  "trainFilterFile": "/usr/share/dict/words",
+  "trainMaxWords": 60000
 }
 ```
 
 Then:
 
 ```bash
-node scripts/build-model.mjs --pair en-ru
+node scripts/build-model.mjs --lang ru
 ```
 
-Two things decide whether the result is any good.
+Three things decide whether the result is any good.
 
-**Corpus quality.** A raw web-frequency list is mostly not the language it claims
-to be, and training on that noise makes the model permissive enough to accept
-the other language pushed through the layout. `trainFilterFile` intersects the
-training set with a real dictionary, which widened the English separation from
-0.56 to 0.92. It only affects bigram training, never the word list, so domain
-words like `github` and `npm` stay recognised.
+**Corpus quality.** A raw web or subtitle frequency list is partly not the
+language it claims to be, and training on that noise makes the model permissive
+enough to accept another language pushed through a key table. `trainFilterFile`
+intersects the training set with a real dictionary, which widened the English
+separation from 0.56 to 0.92; where no dictionary is available, `trainMaxWords`
+caps the long tail instead. Neither affects the word list, so domain words like
+`github` stay recognised.
 
 **Morphology.** Use a corpus whose forms look like running text. Hebrew attaches
 `ל ב ו ה ש מ כ` directly to the word, and a base-form list misses most of what
-people actually type: `לדוגמה` is absent from the base list and rank 1987 in the
-with-prefixes one. The same applies to any language with clitics or heavy
-inflection.
+people type: `לדוגמה` is absent from the base list and rank 1987 in the
+with-prefixes one.
 
-The builder prints a **separation** figure per side, the gap between real words
-and the other language transposed through your table. Below about 0.5 the
-scorer will not discriminate and you should fix the corpus before going further.
+**Negatives are kept per source language, never pooled.** The builder calibrates
+against every other layout's real words pushed through the real key tables, and
+takes the percentile of the **hardest** confuser. Pooling is a bug: languages
+differ in how confusable they are once transposed, and one easy source drags a
+pooled percentile down, quietly making the model permissive toward the hard one.
+Adding Russian pooled moved the English bound from -3.49 to -3.92 and broke
+detection of `ksudnt` outright. The builder prints each source's bound and marks
+which one sets the bar. Below about 0.5 separation the scorer will not
+discriminate and the corpus needs fixing first.
 
 ## 3. Prove it
 
 ```bash
-node scripts/kbfix.mjs --self-test      # fixtures, including must-abstain cases
-node scripts/kbfix.mjs --bench          # the false-positive gate
-node scripts/stress.mjs --pair en-ru    # thousands of lines from the corpora
+node scripts/kbfix.mjs --self-test   # fixtures, including must-abstain cases
+node scripts/kbfix.mjs --bench       # the false-positive gate
+node scripts/stress.mjs              # thousands of lines, every direction
 ```
 
-Add cases to `tests/fixtures.json` and `tests/bench.json` for your pair. The
+Add cases to `tests/fixtures.json` and `tests/bench.json` for your language. The
 bench matters more than the fixtures: a miss costs nothing, but a false positive
 puts words in somebody's mouth. Anything that fires there is a bug, not a tuning
 opportunity.
+
+Adding a layout makes every existing language's job harder, because every input
+gains another candidate reading. Re-run all three gates for **every** language
+after adding one, not just the new one.

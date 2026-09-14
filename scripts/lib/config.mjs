@@ -10,11 +10,12 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const DEFAULTS = {
-  pair: 'en-he',
-  directions: ['he->en', 'en->he'],
+  layouts: null,          // null means every installed layout
+  directions: null,       // null means every direction between them
   minSignalChars: 4,
   minTargetScore: 0.55,
   minMargin: 0.35,
+  minCandidateGap: 0.15,
 };
 
 export function configPaths() {
@@ -25,11 +26,24 @@ export function configPaths() {
   return out;
 }
 
+/**
+ * Accept the pre-0.2 single-pair shape so an existing .kbfix.json keeps working:
+ * `{"pair": "en-he"}` becomes `{"layouts": ["en", "he"]}`.
+ */
+export function normalise(raw) {
+  const cfg = { ...DEFAULTS, ...raw };
+  if (!cfg.layouts && typeof raw.pair === 'string' && raw.pair.includes('-')) {
+    cfg.layouts = raw.pair.split('-');
+    cfg.migratedFromPair = raw.pair;
+  }
+  return cfg;
+}
+
 export function loadConfig() {
   for (const file of configPaths()) {
     if (!existsSync(file)) continue;
     try {
-      return { ...DEFAULTS, ...JSON.parse(readFileSync(file, 'utf8')), source: file };
+      return { ...normalise(JSON.parse(readFileSync(file, 'utf8'))), source: file };
     } catch {
       // A broken config must not take the hook down with it.
       return { ...DEFAULTS, source: `${file} (unreadable, using defaults)` };

@@ -1,11 +1,22 @@
 {
   "name": "kbfix",
   "displayName": "kbfix",
-  "version": "0.1.0",
-  "description": "Recover text typed with the wrong keyboard layout selected. A UserPromptSubmit hook reads every prompt, and when it is confident the keystrokes came out of the other layout it says how the prompt reads instead. It annotates, it never rewrites what you typed. Ships an English/Hebrew key table; other layout pairs are data files you can add.",
-  "author": { "name": "Bar Moshe" },
+  "version": "0.2.0",
+  "description": "Recover text typed with the wrong keyboard layout selected. A UserPromptSubmit hook reads every prompt, and when it is confident the keystrokes came out of the wrong layout it says how the prompt reads instead. It annotates, it never rewrites what you typed. English, Hebrew and Russian ship; adding a language is adding a folder.",
+  "author": {
+    "name": "Bar Moshe"
+  },
   "license": "MIT",
   "homepage": "https://github.com/barmoshe/kbfix",
   "repository": "https://github.com/barmoshe/kbfix",
-  "keywords": ["keyboard", "layout", "hebrew", "transliteration", "userpromptsubmit", "typo", "input-method"]
+  "keywords": [
+    "keyboard",
+    "layout",
+    "hebrew",
+    "russian",
+    "cyrillic",
+    "transliteration",
+    "userpromptsubmit",
+    "input-method"
+  ]
 }

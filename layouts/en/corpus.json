@@ -1,0 +1,9 @@
+{
+  "url": "https://norvig.com/ngrams/count_1w.txt",
+  "separator": "\t",
+  "credit": "Peter Norvig, word counts from the Google Web Trillion Word Corpus.",
+  "trainFilterFile": "/usr/share/dict/words",
+  "trainMaxWords": 40000,
+  "trainFilterWhy": "These are raw web tokens, so roughly four fifths of them are not English. Training the bigram table on all of it makes the model permissive enough to accept Hebrew pushed through the layout: intersecting with the system dictionary widens the separation from 0.56 to 0.92. The filter only affects bigram training, never the word list, so github and npm stay recognised. If the file is absent the builder falls back to trainMaxWords.",
+  "note": "Where the scoring model comes from. Only scripts/build-model.mjs reads this, and only when you regenerate model.json. The runtime never fetches anything."
+}

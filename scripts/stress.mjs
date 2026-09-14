@@ -2,11 +2,11 @@
 /**
  * stress - measure the detector against the corpora. DEVELOPMENT ONLY.
  *
- * `kbfix --bench` is the committed, hand-written gate: a few dozen lines that
- * must never fire, each one chosen because it represents a way this can go
- * wrong. This is the other half - tens of thousands of synthetic-but-real lines
- * built from the same frequency corpora the model was trained on, reporting
- * both halves of the ledger:
+ * `kbfix --bench` is the committed, hand-written gate: a hundred-odd lines that
+ * must never fire, each chosen because it represents a way this can go wrong.
+ * This is the other half - tens of thousands of synthetic-but-real lines built
+ * from the same frequency corpora the models were trained on, reporting both
+ * halves of the ledger, for every layout and every direction between them:
  *
  *   false positives   real prose the detector wrongly claims is a mistype
  *   recall            genuine mistypes it correctly catches
@@ -15,43 +15,50 @@
  * call puts words in somebody's mouth.
  *
  * Needs the corpora that build-model.mjs caches:
- *   node scripts/build-model.mjs --pair en-he    (populates ~/.cache/kbfix)
- *   node scripts/stress.mjs --pair en-he
+ *   node scripts/build-model.mjs      (populates ~/.cache/kbfix)
+ *   node scripts/stress.mjs
  */
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createEngine } from './kbfix.mjs';
 import { loadConfig } from './lib/config.mjs';
-import { toA, toB, LAYOUTS_DIR } from './lib/layout.mjs';
+import { transpose, LAYOUTS_DIR } from './lib/layout.mjs';
 
 function arg(name, fallback = null) {
   const i = process.argv.indexOf(`--${name}`);
   return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 }
 
-const pair = arg('pair', 'en-he');
 const cacheDir = arg('cache', join(process.env.HOME || '.', '.cache', 'kbfix'));
 const N = Number(arg('n', '4000'));
 
-const engine = createEngine({ ...loadConfig(), pair });
-const { L } = engine;
-const spec = JSON.parse(readFileSync(join(LAYOUTS_DIR, pair, 'corpus.json'), 'utf8'));
+const engine = createEngine(loadConfig());
+const { layouts, langs } = engine;
 
-function corpusWords(side, max) {
-  const file = join(cacheDir, spec[side].url.split('/').pop());
+function corpusWords(lang, max) {
+  const spec = JSON.parse(readFileSync(join(LAYOUTS_DIR, lang, 'corpus.json'), 'utf8'));
+  const file = join(cacheDir, spec.url.split('/').pop());
   if (!existsSync(file)) {
     console.error(`stress: no cached corpus at ${file}`);
-    console.error(`        run: node scripts/build-model.mjs --pair ${pair}`);
+    console.error('        run: node scripts/build-model.mjs');
     process.exit(1);
   }
-  const sep = spec[side].separator;
+  // Keep only words actually written in this language's alphabet. Frequency
+  // corpora carry foreign tokens (the Russian subtitle list is ~1% Latin: ok,
+  // tv, no), and those are not round-trips at all - they pass through the
+  // recovery hop untouched and then get transposed on the way back, which would
+  // show up as a decode error that is really a corpus artefact.
+  const letters = layouts.get(lang).letters;
   const out = [];
   for (const line of readFileSync(file, 'utf8').split('\n')) {
-    const at = line.indexOf(sep);
+    const at = line.indexOf(spec.separator);
     if (at < 0) continue;
     const w = line.slice(0, at).trim();
-    if (w) out.push(w);
+    if (!w) continue;
+    let pure = true;
+    for (const ch of w) if (!letters.has(ch)) { pure = false; break; }
+    if (pure) out.push(w);
     if (out.length >= max) break;
   }
   return out;
@@ -72,46 +79,64 @@ function falsePositives(label, pool, lo, hi) {
     const r = engine.analyze(line);
     if (r.confident) {
       fired += 1;
-      if (examples.length < 6) examples.push(`${JSON.stringify(line)} -> ${JSON.stringify(r.decoded)} ${JSON.stringify(r.scores)}`);
+      if (examples.length < 5) examples.push(`${JSON.stringify(line)} -> ${JSON.stringify(r.decoded)} (${r.direction}) ${JSON.stringify(r.scores)}`);
     }
   }
-  console.log(`  ${label.padEnd(40)} ${String(fired).padStart(5)}/${N}  ${((fired / N) * 100).toFixed(2)}%`);
+  console.log(`  ${label.padEnd(44)} ${String(fired).padStart(5)}/${N}  ${((fired / N) * 100).toFixed(2)}%`);
   for (const e of examples) console.log(`      ${e}`);
   return fired;
 }
 
-function recall(label, pool, transpose, lo, hi) {
+function recall(from, to, pool, lo, hi) {
   let caught = 0;
   let exact = 0;
+  let wrongLayout = 0;
   const n = Math.round(N / 2);
   for (let i = 0; i < n; i += 1) {
     const intended = sentence(pool, lo, hi);
-    const r = engine.analyze(transpose(intended));
-    if (r.confident) { caught += 1; if (r.decoded === intended) exact += 1; }
+    // What the keyboard really does: `from` is the language meant, `to` is the
+    // layout that was actually selected, so the faithful simulation runs
+    // intended-language text through the selected layout.
+    const typo = transpose(intended, layouts.get(from), layouts.get(to), { faithful: true });
+    if (!typo.trim()) continue;
+    const r = engine.analyze(typo);
+    if (r.confident) {
+      caught += 1;
+      if (r.decoded === intended) exact += 1;
+      else if (r.direction !== `${to}->${from}`) wrongLayout += 1;
+    }
   }
-  console.log(`  ${label.padEnd(40)} ${String(caught).padStart(5)}/${n}  ${((caught / n) * 100).toFixed(1)}%  exact ${exact}/${caught}`);
+  const tag = wrongLayout ? `  WRONG LAYOUT ${wrongLayout}` : '';
+  console.log(`  ${`${from} typed on the ${to} layout`.padEnd(44)} ${String(caught).padStart(5)}/${n}  ${((caught / n) * 100).toFixed(1)}%  exact ${exact}/${caught}${tag}`);
+  return wrongLayout;
 }
 
-const aPool = corpusWords('a', 3000);
-const bPool = corpusWords('b', 3000);
-const aMid = corpusWords('a', 40000).slice(15000);
-const bMid = corpusWords('b', 60000).slice(20000);
+const pools = new Map();
+const midPools = new Map();
+for (const lang of langs) {
+  pools.set(lang, corpusWords(lang, 3000));
+  midPools.set(lang, corpusWords(lang, 60000).slice(20000));
+}
 
-console.log(`kbfix stress: ${pair}, ${N} lines per sweep\n`);
+console.log(`kbfix stress: ${langs.join(', ')}, ${N} lines per sweep\n`);
 console.log('FALSE POSITIVES (real prose that must be left alone)');
 let bad = 0;
-bad += falsePositives(`${L.a.label} sentences`, aPool, 2, 7);
-bad += falsePositives(`${L.a.label} uncommon words`, aMid, 2, 7);
-bad += falsePositives(`${L.a.label} short (2-3 words)`, aPool, 2, 3);
-bad += falsePositives(`${L.b.label} sentences`, bPool, 2, 7);
-bad += falsePositives(`${L.b.label} uncommon words`, bMid, 2, 7);
-bad += falsePositives(`${L.b.label} short (2-3 words)`, bPool, 2, 3);
+for (const lang of langs) {
+  const label = layouts.get(lang).label;
+  bad += falsePositives(`${label} sentences`, pools.get(lang), 2, 7);
+  bad += falsePositives(`${label} uncommon words`, midPools.get(lang), 2, 7);
+  bad += falsePositives(`${label} short (2-3 words)`, pools.get(lang), 2, 3);
+}
 
 console.log('\nRECALL (genuine mistypes that should be caught)');
-recall(`${L.a.label} typed on the ${L.b.label} layout`, aPool, (s) => toB(s, L, { faithful: true }), 2, 7);
-recall(`${L.b.label} typed on the ${L.a.label} layout`, bPool, (s) => toA(s, L), 2, 7);
-recall(`${L.a.label} short mistype`, aPool, (s) => toB(s, L, { faithful: true }), 2, 3);
-recall(`${L.b.label} short mistype`, bPool, (s) => toA(s, L), 2, 3);
+let misrouted = 0;
+for (const from of langs) {
+  for (const to of langs) {
+    if (from === to) continue;
+    misrouted += recall(from, to, pools.get(from), 2, 7);
+  }
+}
 
 console.log(bad === 0 ? '\nSTRESS CLEAN: no false positives' : `\nSTRESS FAILED: ${bad} false positive(s)`);
+if (misrouted) console.log(`WARNING: ${misrouted} reading(s) confidently attributed to the wrong layout`);
 process.exit(bad === 0 ? 0 : 1);

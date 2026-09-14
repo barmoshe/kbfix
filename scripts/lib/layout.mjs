@@ -1,15 +1,17 @@
 /**
- * Layout pair loading and transposition.
+ * Layouts and transposition.
  *
- * A layout pair is data, not code: layouts/<id>/layout.json holds the key table
- * for two input sources, and everything here is driven by it. Adding a pair is
- * adding a folder, not editing this file.
+ * A layout is data: layouts/<lang>/layout.json says what every physical key
+ * emits on that input source. Adding a language is adding a folder.
  *
- * Naming: "a" and "b" are the two sides of the pair, never "english"/"hebrew".
- * For the shipped en-he pair, a is English and b is Hebrew.
+ * Everything is expressed against one REFERENCE keyboard, the US ANSI layout,
+ * and a "key" is named by the character that reference emits. So decoding is
+ * always two hops: text in the layout that produced it, back to the keys that
+ * were pressed, forward into the layout that was meant. With N layouts that is
+ * N-1 candidate readings for any input, and no N-squared table of pairs.
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -17,7 +19,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export const PLUGIN_ROOT = join(HERE, '..', '..');
 export const LAYOUTS_DIR = join(PLUGIN_ROOT, 'layouts');
 
-/** Expand a letter class like "a-z" or "א-ת" into the literal set of characters. */
+/** Expand a letter class like "a-z" or "а-яёА-ЯЁ" into the literal characters. */
 export function expandLetterClass(spec) {
   const out = [];
   for (let i = 0; i < spec.length; i += 1) {
@@ -33,103 +35,126 @@ export function expandLetterClass(spec) {
   return out;
 }
 
-export function loadLayout(pairId, { layoutsDir = LAYOUTS_DIR } = {}) {
-  const file = join(layoutsDir, pairId, 'layout.json');
-  if (!existsSync(file)) throw new Error(`kbfix: no layout pair "${pairId}" (looked in ${file})`);
+/** Every language that has a layouts/<lang>/layout.json. */
+export function installedLayouts({ layoutsDir = LAYOUTS_DIR } = {}) {
+  return readdirSync(layoutsDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && existsSync(join(layoutsDir, e.name, 'layout.json')))
+    .map((e) => e.name)
+    .sort();
+}
+
+export function loadLayout(lang, { layoutsDir = LAYOUTS_DIR } = {}) {
+  const file = join(layoutsDir, lang, 'layout.json');
+  if (!existsSync(file)) throw new Error(`kbfix: no layout "${lang}" (looked in ${file})`);
   return compileLayout(JSON.parse(readFileSync(file, 'utf8')));
 }
 
 export function compileLayout(raw) {
-  const pairs = [...raw.base, ...raw.shift];
+  const keys = raw.keys || [];
 
-  // a -> b is a plain per-character map.
-  const A_TO_B = new Map(pairs);
+  // FIRST writer wins in both directions. `new Map(pairs)` would let the LAST
+  // entry win, which silently mis-decodes any key the dump lists twice: on the
+  // Russian layout two physical keys both read as "." on the reference board,
+  // emitting ю and , respectively, and only the first is the one people mean.
+  const emit = new Map();
+  for (const [key, out] of keys) if (!emit.has(key)) emit.set(key, out);
 
-  // b -> a: first writer wins, so a collision resolves to whichever key the
-  // table lists first (for en-he, C beats K on לֹ).
-  const B_TO_A = new Map();
-  for (const [a, b] of pairs) if (!B_TO_A.has(b)) B_TO_A.set(b, a);
+  const recover = new Map();
+  for (const [key, out] of keys) if (!recover.has(out)) recover.set(out, key);
 
-  // Longest b-sequence first, so a letter+niqqud pair matches before the bare
-  // letter. Without this, שׁ decodes as ש plus a stray combining mark.
-  const B_KEYS_BY_LEN = [...B_TO_A.keys()].sort((x, y) => y.length - x.length);
+  // Longest output first, so a letter plus a combining mark matches before the
+  // bare letter. Without this, שׁ recovers as ש plus a stray mark.
+  const recoverByLen = [...recover.keys()].sort((a, b) => b.length - a.length);
 
-  // Unshifted key for every shifted key, so a capital can fall back to the
-  // letter its physical key produces. Built from the base row by position.
-  const UNSHIFT = new Map();
-  for (const [a] of raw.base) {
-    const upper = a.toUpperCase();
-    if (upper !== a) UNSHIFT.set(upper, a);
-  }
-
-  const aLetters = new Set(expandLetterClass(raw.a.letterClass));
-  const bLetters = new Set(expandLetterClass(raw.b.letterClass));
+  const unshift = new Map();
+  for (let c = 65; c <= 90; c += 1) unshift.set(String.fromCharCode(c), String.fromCharCode(c + 32));
 
   return {
-    ...raw,
-    A_TO_B,
-    B_TO_A,
-    B_KEYS_BY_LEN,
-    UNSHIFT,
-    aLetters,
-    bLetters,
-    droppedOnB: new Set((raw.droppedOnB || '').split('')),
-    finalForms: new Set(raw.b.finalForms || []),
-    aVowels: new Set((raw.a.vowels || '').split('')),
+    lang: raw.lang,
+    label: raw.label,
+    reference: !!raw.reference,
+    // A unicameral script has no capitals to preserve, so a shifted key that
+    // emits some decorated variant is almost always a habit artifact rather
+    // than intent. Bicameral scripts keep their capitals: on the Russian
+    // layout Shift+K really is Л and throwing that away would be vandalism.
+    hasCase: raw.hasCase !== false,
+    letters: new Set(expandLetterClass(raw.letterClass)),
+    letterClass: raw.letterClass,
+    vowels: new Set((raw.vowels || '').split('')),
+    finalForms: new Set(raw.finalForms || []),
+    emit,
+    recover,
+    recoverByLen,
+    dropped: new Set((raw.dropped || '').split('')),
+    unshift,
+    raw,
   };
 }
 
-/** Characters produced on side b, mapped back to the keys that produced them. */
-export function toA(text, L) {
+export function loadLayouts(langs, opts = {}) {
+  const out = new Map();
+  for (const lang of langs) out.set(lang, loadLayout(lang, opts));
+  return out;
+}
+
+/** Text as produced by `L` -> the reference keys that were pressed. */
+export function toKeys(text, L) {
+  if (L.reference) return text;
   let out = '';
   let i = 0;
   while (i < text.length) {
     let hit = null;
-    for (const key of L.B_KEYS_BY_LEN) {
+    for (const key of L.recoverByLen) {
       if (text.startsWith(key, i)) { hit = key; break; }
     }
-    if (hit) { out += L.B_TO_A.get(hit); i += hit.length; }
+    if (hit) { out += L.recover.get(hit); i += hit.length; }
     else { out += text[i]; i += 1; }
   }
   return out;
 }
 
 /**
- * Characters produced on side a, mapped to what the same physical keys give on
- * side b.
+ * Reference keys -> what `L` emits for them.
  *
- * Two modes, and the difference matters. `faithful: true` reproduces the real
- * keyboard exactly: a shifted key with no output on side b emits nothing, which
- * is what actually happens and what the fixtures need in order to simulate the
- * mistype. `faithful: false` (the default, used for decoding) falls back to the
- * unshifted key instead, because someone who typed `Ksudnt` meant `לדוגמא` and
- * dropping the K would silently eat a letter out of their sentence.
+ * `faithful: true` reproduces the keyboard exactly, including keys that emit
+ * nothing, which is what the fixtures need to simulate a mistype. `faithful:
+ * false` (the default, for decoding) falls back to the unshifted key rather
+ * than swallowing the character, so `Akuo` reads as שלום and not as לום.
  */
-export function toB(text, L, { faithful = false } = {}) {
+export function fromKeys(keys, L, { faithful = false } = {}) {
+  if (L.reference) return keys;
   let out = '';
-  for (const ch of text) {
-    // Decoding mode: every shifted letter falls back to its physical key, so
-    // `Akuo` reads as שלום and not שׁלום. In faithful mode the shifted entries
-    // win, because on the real keyboard they are what shift+A actually emits.
-    if (!faithful && L.UNSHIFT.has(ch)) {
-      const base = L.UNSHIFT.get(ch);
-      out += L.A_TO_B.has(base) ? L.A_TO_B.get(base) : '';
+  for (const ch of keys) {
+    if (!faithful && !L.hasCase && L.unshift.has(ch)) {
+      const base = L.unshift.get(ch);
+      out += L.emit.get(base) ?? '';
       continue;
     }
-    if (L.A_TO_B.has(ch)) { out += L.A_TO_B.get(ch); continue; }
-    if (L.droppedOnB.has(ch)) continue; // emits nothing on the real keyboard
+    if (L.emit.has(ch)) { out += L.emit.get(ch); continue; }
+    if (L.dropped.has(ch)) {
+      if (faithful) continue;
+      const base = L.unshift.get(ch);
+      out += (base && L.emit.get(base)) || '';
+      continue;
+    }
     out += ch;
   }
   return out;
 }
 
-/** Count how many characters of each side's alphabet appear in the text. */
-export function scriptCounts(text, L) {
-  let a = 0;
-  let b = 0;
+/** One hop: text produced by `from`, read as though `to` had been selected. */
+export function transpose(text, from, to, opts = {}) {
+  return fromKeys(toKeys(text, from), to, opts);
+}
+
+/** Which layouts' alphabets appear in the text, and how often. */
+export function scriptCounts(text, layouts) {
+  const counts = new Map();
+  for (const lang of layouts.keys()) counts.set(lang, 0);
   for (const ch of text) {
-    if (L.aLetters.has(ch)) a += 1;
-    else if (L.bLetters.has(ch)) b += 1;
+    for (const [lang, L] of layouts) {
+      if (L.letters.has(ch)) { counts.set(lang, counts.get(lang) + 1); break; }
+    }
   }
-  return { a, b };
+  return counts;
 }

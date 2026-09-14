@@ -1,5 +1,5 @@
 {
-  "note": "Behaviour fixtures for the en-he pair. `expect: null` means the detector must abstain. Add a case here whenever a miss or a false positive bites you; --self-test is the regression gate.",
+  "note": "Behaviour fixtures. `expect: null` means the detector must abstain. Add a case here whenever a miss or a false positive bites you; --self-test is the regression gate.",
   "cases": [
     {
       "input": "בםצצןא שמג פודי אם צשןמ",
@@ -31,19 +31,105 @@
       "direction": "en->he",
       "why": "leading comma is the ' key; two real Hebrew words"
     },
-
-    { "input": "תודה רבה על העזרה", "expect": null, "why": "real Hebrew, never touch it" },
-    { "input": "היי דן מה המצב", "expect": null, "why": "real Hebrew, never touch it" },
-    { "input": "אני צריך לבדוק את הקובץ הזה", "expect": null, "why": "real Hebrew, never touch it" },
-
-    { "input": "commit and push to main", "expect": null, "why": "real English, never touch it" },
-    { "input": "can you check the hook please", "expect": null, "why": "real English, never touch it" },
-
-    { "input": "בנאשמג פודי", "expect": null, "why": "near-gibberish both ways, no call is safe" },
-    { "input": "אם", "expect": null, "why": "two letters: both real Hebrew ('if') and layout-typed 'to'" },
-    { "input": "ok", "expect": null, "why": "under the signal-character floor" },
-    { "input": "12:00", "expect": null, "why": "digits are identical in both layouts and carry no direction" },
-    { "input": "commit and push לmain", "expect": null, "why": "mixed script: half-decoding is worse than not decoding" },
-    { "input": "", "expect": null, "why": "empty input" }
+    {
+      "input": "ghbdtn",
+      "expect": "привет",
+      "direction": "en->ru",
+      "why": "Russian typed with English selected, the third layout's basic case"
+    },
+    {
+      "input": "cgfcb,j",
+      "expect": "спасибо",
+      "direction": "en->ru",
+      "why": "the comma key is a Cyrillic letter, so punctuation carries signal here too"
+    },
+    {
+      "input": "Ghbdtn",
+      "expect": "Привет",
+      "direction": "en->ru",
+      "why": "Russian is bicameral and nothing is dropped, so unlike Hebrew the capital SURVIVES"
+    },
+    {
+      "input": "руддщ",
+      "expect": "hello",
+      "direction": "ru->en",
+      "why": "English typed with Russian selected"
+    },
+    {
+      "input": "ytn cgfcb,j",
+      "expect": "нет спасибо",
+      "direction": "en->ru",
+      "why": "two words, still unambiguous"
+    },
+    {
+      "input": "привет как дела",
+      "expect": null,
+      "why": "real Russian, never touch it"
+    },
+    {
+      "input": "спасибо большое за помощь",
+      "expect": null,
+      "why": "real Russian, never touch it"
+    },
+    {
+      "input": "это не работает",
+      "expect": null,
+      "why": "real Russian, never touch it"
+    },
+    {
+      "input": "תודה רבה על העזרה",
+      "expect": null,
+      "why": "real Hebrew, never touch it"
+    },
+    {
+      "input": "היי דן מה המצב",
+      "expect": null,
+      "why": "real Hebrew, never touch it"
+    },
+    {
+      "input": "אני צריך לבדוק את הקובץ הזה",
+      "expect": null,
+      "why": "real Hebrew, never touch it"
+    },
+    {
+      "input": "commit and push to main",
+      "expect": null,
+      "why": "real English, never touch it"
+    },
+    {
+      "input": "can you check the hook please",
+      "expect": null,
+      "why": "real English, never touch it"
+    },
+    {
+      "input": "בנאשמג פודי",
+      "expect": null,
+      "why": "near-gibberish both ways, no call is safe"
+    },
+    {
+      "input": "אם",
+      "expect": null,
+      "why": "two letters: both real Hebrew ('if') and layout-typed 'to'"
+    },
+    {
+      "input": "ok",
+      "expect": null,
+      "why": "under the signal-character floor"
+    },
+    {
+      "input": "12:00",
+      "expect": null,
+      "why": "digits are identical in both layouts and carry no direction"
+    },
+    {
+      "input": "commit and push לmain",
+      "expect": null,
+      "why": "mixed script: half-decoding is worse than not decoding"
+    },
+    {
+      "input": "",
+      "expect": null,
+      "why": "empty input"
+    }
   ]
 }

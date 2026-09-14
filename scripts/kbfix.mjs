@@ -4,13 +4,16 @@
  *
  * When the wrong input source is active the keystrokes still land; only the
  * table that rendered them was wrong. `commit and push to main` typed on the
- * Hebrew layout arrives as `בםצצןא שמג פודי אם צשןמ`, and `לדוגמא` typed on the
- * English one arrives as `ksudnt`. Both are fully recoverable.
+ * Hebrew layout arrives as `בםצצןא שמג פודי אם צשןמ`, `לדוגמא` typed on the
+ * English one arrives as `ksudnt`, and `привет` arrives as `ghbdtn`. All of it
+ * is recoverable.
  *
- * Detection runs in BOTH directions, and the verdict is symmetric: transpose,
- * then ask whether the result reads better as real prose than the original did.
- * It only says so when the gap is wide. When in doubt it abstains, because a
- * wrong call is worse than no call.
+ * Detection is symmetric and works over any number of layouts. Identify which
+ * alphabet the text is in, transpose it into every other installed layout, and
+ * ask whether any of those readings is both plausible prose AND clearly better
+ * than both the original and the runner-up. Otherwise say nothing: with three
+ * layouts a Latin string has two possible readings, and picking the wrong one
+ * is worse than picking neither.
  *
  * What it never does is rewrite the prompt. The hook emits additionalContext
  * naming the reading and leaves the original text exactly as typed, so a false
@@ -19,9 +22,9 @@
  *
  * Usage:
  *   kbfix "בםצצןא שמג פודי אם צשןמ"   detect and print the reading
- *   kbfix --json "..."                full verdict with scores
- *   kbfix --to-en "..." / --to-he     force one direction, no scoring
- *   kbfix --force "..."               transpose even when not confident
+ *   kbfix --json "..."                full verdict, with every candidate
+ *   kbfix --to ru "..."               force one direction, no scoring
+ *   kbfix --force "..."               best transposition even when not confident
  *   kbfix --explain "..."             per-token scoring breakdown
  *   echo '<hook json>' | kbfix --hook UserPromptSubmit mode
  *   kbfix --self-test                 fixtures
@@ -33,9 +36,11 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadLayout, toA, toB, scriptCounts, PLUGIN_ROOT } from './lib/layout.mjs';
+import {
+  loadLayouts, installedLayouts, transpose, scriptCounts, PLUGIN_ROOT,
+} from './lib/layout.mjs';
 import { loadModel, makeScorer, structuralRuleFor } from './lib/score.mjs';
-import { loadConfig, DEFAULTS } from './lib/config.mjs';
+import { loadConfig } from './lib/config.mjs';
 
 const TESTS_DIR = join(PLUGIN_ROOT, 'tests');
 
@@ -44,80 +49,103 @@ const TESTS_DIR = join(PLUGIN_ROOT, 'tests');
 // ---------------------------------------------------------------------------
 
 export function createEngine(config = loadConfig()) {
-  const L = loadLayout(config.pair);
-  const model = loadModel(config.pair);
+  const langs = config.layouts && config.layouts.length ? config.layouts : installedLayouts();
+  const layouts = loadLayouts(langs);
 
-  const scoreA = makeScorer(model.a, { letters: L.aLetters, structural: structuralRuleFor(L, 'a') });
-  const scoreB = makeScorer(model.b, { letters: L.bLetters, structural: structuralRuleFor(L, 'b') });
+  const scorers = new Map();
+  for (const [lang, L] of layouts) {
+    scorers.set(lang, makeScorer(loadModel(lang), { letters: L.letters, structural: structuralRuleFor(L) }));
+  }
 
-  // Readable direction names derived from the pair, with generic aliases so a
-  // config written as "b->a" works for any layout pair.
-  const BA = `${L.b.lang}->${L.a.lang}`;
-  const AB = `${L.a.lang}->${L.b.lang}`;
-  const wanted = new Set(config.directions || DEFAULTS.directions);
-  const enabled = {
-    ba: wanted.has(BA) || wanted.has('b->a'),
-    ab: wanted.has(AB) || wanted.has('a->b'),
-  };
+  const allowed = config.directions ? new Set(config.directions) : null;
+  const permitted = (from, to) => !allowed || allowed.has(`${from}->${to}`);
 
   /**
-   * Whole-message or nothing, and only one candidate can ever exist: mixed
-   * script is rejected before we get here. A mixed line is left alone rather
-   * than half-decoded, because short words are genuinely ambiguous - `אם` is
-   * both real Hebrew ("if") and layout-typed `to`.
+   * Whole-message or nothing. A line mixing two alphabets is left alone rather
+   * than half-decoded, because short words are genuinely ambiguous: `אם` is both
+   * real Hebrew ("if") and layout-typed `to`.
    */
   function analyze(text) {
     const raw = text ?? '';
-    const { a, b } = scriptCounts(raw, L);
-    const base = { input: raw, decoded: null, direction: null, confident: false };
+    const counts = scriptCounts(raw, layouts);
+    const present = [...counts].filter(([, n]) => n > 0);
+    const signal = present.reduce((n, [, c]) => n + c, 0);
+    const base = { input: raw, decoded: null, direction: null, confident: false, candidates: [] };
 
-    if (a + b < config.minSignalChars) {
-      return { ...base, reason: 'not enough letters to judge' };
-    }
-    if (a > 0 && b > 0) {
-      return { ...base, reason: 'mixed scripts, left alone by design' };
-    }
+    if (signal < config.minSignalChars) return { ...base, reason: 'not enough letters to judge' };
+    if (present.length > 1) return { ...base, reason: 'mixed scripts, left alone by design' };
 
-    if (b > 0) {
-      if (!enabled.ba) return { ...base, reason: `direction ${BA} is switched off in config` };
-      const decoded = toA(raw, L);
-      return verdict({ ...base, direction: BA, decoded, target: scoreA(decoded), source: scoreB(raw) }, config);
-    }
+    const from = present[0][0];
+    const source = scorers.get(from)(raw);
 
-    if (!enabled.ab) return { ...base, reason: `direction ${AB} is switched off in config` };
-    const decoded = toB(raw, L);
-    return verdict({ ...base, direction: AB, decoded, target: scoreB(decoded), source: scoreA(raw) }, config);
+    const candidates = [];
+    for (const [to, L] of layouts) {
+      if (to === from || !permitted(from, to)) continue;
+      const decoded = transpose(raw, layouts.get(from), L);
+      candidates.push({ direction: `${from}->${to}`, decoded, target: round(scorers.get(to)(decoded)) });
+    }
+    if (candidates.length === 0) {
+      return { ...base, reason: `no enabled direction leads out of ${from}` };
+    }
+    candidates.sort((a, b) => b.target - a.target);
+
+    const best = candidates[0];
+    const runnerUp = candidates[1];
+    return verdict({
+      ...base,
+      direction: best.direction,
+      decoded: best.decoded,
+      target: best.target,
+      source,
+      runnerUp: runnerUp ? round(runnerUp.target) : null,
+      candidates,
+    }, config);
   }
 
-  return { L, config, analyze, scoreA, scoreB, directions: { BA, AB }, enabled };
+  return { layouts, langs, config, analyze, scorers, analyzeCandidatesOnly: analyze };
 }
 
+/**
+ * Three gates, all of which must pass.
+ *
+ * `target` is how much the reading looks like real prose. `margin` is how far it
+ * beats the text as typed, and it is the one that keeps ordinary prompts safe:
+ * real prose scores near 1 in its own language, so nothing can out-run it.
+ * `gap` is how far the best reading beats the second-best, and it only exists
+ * once there are three or more layouts: when Latin input reads plausibly as both
+ * Hebrew and Russian, neither answer is safe to give.
+ */
 function verdict(v, config) {
-  const { target, source } = v;
-  const margin = target - source;
-  const confident = target >= config.minTargetScore && margin >= config.minMargin;
+  const margin = round(v.target - v.source);
+  const gap = v.runnerUp === null ? null : round(v.target - v.runnerUp);
+
+  const failedTarget = v.target < config.minTargetScore;
+  const failedMargin = margin < config.minMargin;
+  const failedGap = gap !== null && gap < config.minCandidateGap;
+  const confident = !failedTarget && !failedMargin && !failedGap;
+
   return {
     ...v,
-    scores: { target: round(target), source: round(source), margin: round(margin) },
+    scores: { target: round(v.target), source: round(v.source), margin, gap },
     confident,
     reason: confident
       ? 'the transposed text reads as real prose and the original does not'
-      : target < config.minTargetScore
+      : failedTarget
         ? 'the transposed text does not read as real prose'
-        : 'the original reads about as well as the transposition, so no call is safe',
+        : failedMargin
+          ? 'the original reads about as well as the transposition, so no call is safe'
+          : 'two layouts read about equally well, so the reading is ambiguous',
   };
 }
 
 const round = (n) => Math.round(n * 100) / 100;
 
 // ---------------------------------------------------------------------------
-// Tests. Fixtures and the bench corpus are data files so anyone adding a layout
-// pair, or a case that bit them, edits JSON rather than this script.
+// Tests. Fixtures and the bench corpus are data files so anyone adding a layout,
+// or a case that bit them, edits JSON rather than this script.
 // ---------------------------------------------------------------------------
 
-function readJson(file) {
-  return JSON.parse(readFileSync(file, 'utf8'));
-}
+const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
 
 function selfTest(engine) {
   const { cases } = readJson(join(TESTS_DIR, 'fixtures.json'));
@@ -126,8 +154,7 @@ function selfTest(engine) {
     const r = engine.analyze(c.input);
     const got = r.confident ? r.decoded : null;
     const gotDir = r.confident ? r.direction : null;
-    const ok = got === (c.expect ?? null) && gotDir === (c.direction ?? null);
-    if (ok) {
+    if (got === (c.expect ?? null) && gotDir === (c.direction ?? null)) {
       console.log(`ok    ${JSON.stringify(c.input)} -> ${JSON.stringify(got)}`);
     } else {
       failed += 1;
@@ -137,17 +164,23 @@ function selfTest(engine) {
     }
   }
 
-  // Property: every key that survives on side b must come back as itself.
-  const { L } = engine;
-  for (const [a, b] of L.base) {
-    const back = toA(b, L);
-    if (back !== a) { failed += 1; console.error(`FAIL  round-trip ${a} -> ${b} -> ${back}`); }
-  }
-  // Property: faithful mode drops the shifted keys that emit nothing, decoding
-  // mode falls back to the physical key instead.
-  for (const ch of L.droppedOnB) {
-    if (toB(ch, L, { faithful: true }) !== '') { failed += 1; console.error(`FAIL  ${ch} should emit nothing in faithful mode`); }
-    if (toB(ch, L, { faithful: false }) === '') { failed += 1; console.error(`FAIL  ${ch} should fall back to its unshifted key when decoding`); }
+  // Property: every key round-trips through every non-reference layout.
+  for (const [lang, L] of engine.layouts) {
+    if (L.reference) continue;
+    for (const [key, out] of L.raw.keys) {
+      if (L.recover.get(out) !== key) continue; // a collision resolved to another key
+      const back = transpose(out, L, engine.layouts.get('en') || L);
+      if (back !== key) { failed += 1; console.error(`FAIL  round-trip ${lang}: ${key} -> ${out} -> ${back}`); }
+    }
+    // Property: a dropped key emits nothing faithfully, and falls back when decoding.
+    for (const ch of L.dropped) {
+      if (transpose(ch, engine.layouts.get('en'), L, { faithful: true }) !== '') {
+        failed += 1; console.error(`FAIL  ${lang}: ${ch} should emit nothing in faithful mode`);
+      }
+      if (transpose(ch, engine.layouts.get('en'), L, { faithful: false }) === '') {
+        failed += 1; console.error(`FAIL  ${lang}: ${ch} should fall back to its unshifted key when decoding`);
+      }
+    }
   }
 
   console.log(failed === 0 ? '\nALL KBFIX TESTS PASSED' : `\n${failed} KBFIX TEST(S) FAILED`);
@@ -157,9 +190,9 @@ function selfTest(engine) {
 /**
  * The false-positive gate.
  *
- * With both directions live, every ordinary prompt is a detection candidate, so
- * the corpus that must be left ALONE is the one that decides whether this is
- * shippable. Anything flagged here is a bug, not a tuning opportunity.
+ * Every ordinary prompt is a detection candidate, so the corpus that must be
+ * left ALONE is the one that decides whether this is shippable. Anything flagged
+ * here is a bug, not a tuning opportunity.
  */
 function bench(engine) {
   const { quiet } = readJson(join(TESTS_DIR, 'bench.json'));
@@ -190,35 +223,38 @@ function bench(engine) {
 
 const HELP = `kbfix - recover text typed with the wrong keyboard layout selected
 
-  kbfix "<text>"          detect and print the reading
-  kbfix --json "<text>"   full verdict as JSON
-  kbfix --to-en "<text>"  force side b -> side a, no scoring
-  kbfix --to-he "<text>"  force side a -> side b, no scoring
-  kbfix --faithful        with --to-he, simulate the keyboard exactly (drops
-                          the shifted keys that emit nothing) instead of
-                          falling back to the physical key
-  kbfix --force "<text>"  transpose anyway when it is not confident
-  kbfix --explain "<text>" per-token scoring breakdown for both readings
-  kbfix --config          show the active config and where it came from
-  kbfix --self-test       run the fixtures
-  kbfix --bench           false-positive gate over real prose
-  kbfix --hook            read a UserPromptSubmit payload on stdin and, only when
-                          confident, emit additionalContext naming the reading
+  kbfix "<text>"           detect and print the reading
+  kbfix --json "<text>"    full verdict, including every candidate reading
+  kbfix --to <lang> "..."  force a direction, no scoring (--to-en, --to-he alias)
+  kbfix --faithful         with --to, simulate the keyboard exactly (drops the
+                           shifted keys that emit nothing) instead of falling
+                           back to the physical key
+  kbfix --force "<text>"   print the best transposition even when unsure
+  kbfix --explain "<text>" per-token scoring breakdown
+  kbfix --layouts          list installed layouts
+  kbfix --config           show the active config and where it came from
+  kbfix --self-test        run the fixtures
+  kbfix --bench            false-positive gate over real prose
+  kbfix --hook             read a UserPromptSubmit payload on stdin and, only
+                           when confident, emit additionalContext
 
 Reads stdin when given no text. Exit 0 confident, 3 abstained, 1 usage error.
 
-Detection is whole-message or nothing, runs in both directions, and abstains on
-mixed-script input. Configure with .kbfix.json in the project or your home
-directory; see kbfix.config.example.json.
+Detection is whole-message or nothing, runs between every installed layout, and
+abstains on mixed-script input or when two layouts read equally well. Configure
+with .kbfix.json in the project or your home directory; see
+kbfix.config.example.json.
 
-Known limits of the shipped en-he table, all verified against the real layouts:
-  - 21 shifted Latin letters emit nothing on the Hebrew layout, so capitals are
-    lost at the keyboard and their case cannot be recovered.
+Known limits of the shipped tables, all verified against the real layouts:
+  - On the Hebrew layout 21 shifted Latin letters emit nothing, so capitals are
+    lost at the keyboard and their case cannot be recovered. Russian has a full
+    uppercase alphabet, so there its case survives.
   - C and K both emit לֹ, so that character decodes to C.
-  - Digits and most symbols are identical in both layouts and carry no signal.
+  - Digits and most symbols are identical across layouts and carry no signal.
   - Mixed-script lines are left alone rather than half-decoded.
-  - The table is for the macOS "Hebrew" input source. It is WRONG for
-    "Hebrew - QWERTY" and "Hebrew - PC"; see layouts/README.md to make your own.`;
+  - The tables are for the macOS "ABC", "Hebrew" and "Russian" input sources.
+    They are WRONG for "Hebrew - QWERTY", "Hebrew - PC" and the phonetic
+    "Russian - QWERTY"; see layouts/README.md to make your own.`;
 
 async function readStdin() {
   const chunks = [];
@@ -229,7 +265,12 @@ async function readStdin() {
 async function main() {
   const argv = process.argv.slice(2);
   const flags = new Set(argv.filter((a) => a.startsWith('--')));
-  const rest = argv.filter((a) => !a.startsWith('--'));
+  const toIndex = argv.indexOf('--to');
+  const toLang = toIndex > -1 ? argv[toIndex + 1] : null;
+  // Guard the -1: `toIndex + 1` would be 0 when --to is absent, which silently
+  // eats the first positional argument.
+  const toValueIndex = toIndex > -1 ? toIndex + 1 : -1;
+  const rest = argv.filter((a, i) => !a.startsWith('--') && i !== toValueIndex);
 
   if (flags.has('--help') || flags.has('-h')) { console.log(HELP); return 0; }
 
@@ -238,8 +279,7 @@ async function main() {
     // must never be able to interfere with somebody's prompt.
     try {
       const payload = JSON.parse(await readStdin());
-      const engine = createEngine();
-      const r = engine.analyze(payload.prompt ?? payload.user_prompt ?? '');
+      const r = createEngine().analyze(payload.prompt ?? payload.user_prompt ?? '');
       if (r.confident) {
         process.stdout.write(JSON.stringify({
           hookSpecificOutput: {
@@ -260,8 +300,14 @@ async function main() {
 
   const engine = createEngine();
 
+  if (flags.has('--layouts')) {
+    for (const [lang, L] of engine.layouts) {
+      console.log(`${lang}\t${L.label}${L.reference ? '  (reference keyboard)' : ''}\t${L.raw.keys ? L.raw.keys.length : 0} keys`);
+    }
+    return 0;
+  }
   if (flags.has('--config')) {
-    console.log(JSON.stringify({ ...engine.config, enabled: engine.enabled, directions: engine.directions }, null, 2));
+    console.log(JSON.stringify({ ...engine.config, active: engine.langs }, null, 2));
     return 0;
   }
   if (flags.has('--self-test')) return selfTest(engine);
@@ -270,37 +316,43 @@ async function main() {
   const text = rest.length > 0 ? rest.join(' ') : (await readStdin()).replace(/\n$/, '');
   if (!text) { console.error(HELP); return 1; }
 
-  const { L } = engine;
-  if (flags.has('--to-en')) { console.log(toA(text, L)); return 0; }
-  if (flags.has('--to-he')) { console.log(toB(text, L, { faithful: flags.has('--faithful') })); return 0; }
+  // Explicit direction: --to <lang>, plus the pre-0.2 --to-en / --to-he aliases.
+  let forced = toLang;
+  for (const f of flags) {
+    const m = /^--to-([a-z]{2})$/.exec(f);
+    if (m) forced = m[1];
+  }
+  if (forced) {
+    const to = engine.layouts.get(forced);
+    if (!to) { console.error(`kbfix: no layout "${forced}" (have: ${engine.langs.join(', ')})`); return 1; }
+    const counts = scriptCounts(text, engine.layouts);
+    const present = [...counts].filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
+    const from = engine.layouts.get(present.length ? present[0][0] : 'en') || engine.layouts.get('en');
+    console.log(transpose(text, from, to, { faithful: flags.has('--faithful') }));
+    return 0;
+  }
 
   const r = engine.analyze(text);
 
   if (flags.has('--explain')) {
-    console.log(JSON.stringify({
-      verdict: r,
-      asA: engine.scoreA.explain(r.direction === engine.directions.BA ? r.decoded ?? toA(text, L) : text),
-      asB: engine.scoreB.explain(r.direction === engine.directions.AB ? r.decoded ?? toB(text, L) : text),
-    }, null, 2));
+    const detail = {};
+    for (const c of r.candidates) {
+      detail[c.direction] = { decoded: c.decoded, tokens: engine.scorers.get(c.direction.split('->')[1]).explain(c.decoded) };
+    }
+    console.log(JSON.stringify({ verdict: r, candidates: detail }, null, 2));
     return r.confident ? 0 : 3;
   }
   if (flags.has('--json')) { console.log(JSON.stringify(r, null, 2)); return r.confident ? 0 : 3; }
 
   if (r.confident) { console.log(r.decoded); return 0; }
-  if (flags.has('--force')) {
-    const { b } = scriptCounts(text, L);
-    console.log(b > 0 ? toA(text, L) : toB(text, L));
-    console.error(`(forced; not confident: ${r.reason})`);
-    return 0;
-  }
+  if (flags.has('--force') && r.candidates.length) { console.log(r.candidates[0].decoded); console.error(`(forced; not confident: ${r.reason})`); return 0; }
+
   console.error(`kbfix: no confident reading (${r.reason})`);
-  console.error(`  as ${L.a.label}: ${toA(text, L)}`);
-  console.error(`  as ${L.b.label}: ${toB(text, L)}`);
+  for (const c of r.candidates) console.error(`  ${c.direction}  ${c.decoded}   [${c.target}]`);
   return 3;
 }
 
-// Run only when invoked as a program, not when imported by a test. realpath on
-// both sides so a symlinked install still matches.
+// Run only when invoked as a program, not when imported by a test.
 let isEntry = false;
 try {
   isEntry = !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));

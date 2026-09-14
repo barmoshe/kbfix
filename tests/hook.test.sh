@@ -36,6 +36,10 @@ check "fires on a Hebrew-layout mistype"  0 'commit and push to main' \
   '{"hook_event_name":"UserPromptSubmit","prompt":"בםצצןא שמג פודי אם צשןמ"}'
 check "fires on an English-layout mistype" 0 'לדוגמא' \
   '{"hook_event_name":"UserPromptSubmit","prompt":"ksudnt"}'
+check "fires on a Russian mistype"         0 'привет' \
+  '{"hook_event_name":"UserPromptSubmit","prompt":"ghbdtn"}'
+check "silent on real Russian"             0 silent \
+  '{"hook_event_name":"UserPromptSubmit","prompt":"спасибо большое за помощь"}'
 check "never rewrites the prompt"          0 'additionalContext' \
   '{"hook_event_name":"UserPromptSubmit","prompt":"ksudnt"}'
 check "silent on real Hebrew"              0 silent \

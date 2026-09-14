@@ -1,16 +1,20 @@
 ---
 name: keyboard-layout
-description: Use when text arrived through the wrong keyboard layout, so it looks like consonant soup in the other alphabet. Covers the kbfix tool, both directions of the English/Hebrew table, and the four ways a naive character swap gets it wrong. Triggers on unreadable strings like "בםצצןא שמג פודי" or "ksudnt", "this is gibberish", "wrong keyboard", "fix this text I typed in the wrong language", "layout", "מקלדת", or a prompt that only parses once transposed.
+description: Use when text arrived through the wrong keyboard layout, so it looks like consonant soup in another alphabet. Covers the kbfix tool, every direction between the installed layouts (English, Hebrew, Russian), and the four ways a naive character swap gets it wrong. Triggers on unreadable strings like "בםצצןא שמג פודי", "ksudnt" or "ghbdtn", "this is gibberish", "wrong keyboard", "fix this text I typed in the wrong language", "layout", "מקלדת", "раскладка", or a prompt that only parses once transposed.
 license: MIT
 ---
 
 # Wrong keyboard layout
 
 When the wrong input source is selected the keystrokes still register, but the
-characters arrive from the other layout. `commit and push to main` typed while
-Hebrew is active arrives as `בםצצןא שמג פודי אם צשןמ`. `לדוגמא` typed while
-English is active arrives as `ksudnt`. Nothing is lost except the rendering, so
-both are recoverable.
+characters arrive from whichever layout was active. `commit and push to main`
+typed while Hebrew is selected arrives as `בםצצןא שמג פודי אם צשןמ`, `לדוגמא`
+typed while English is selected arrives as `ksudnt`, and `привет` arrives as
+`ghbdtn`. Nothing is lost except the rendering, so all of it is recoverable.
+
+English, Hebrew and Russian ship. Everything is expressed against one reference
+keyboard (US ANSI), so decoding is two hops: text back to the keys that were
+pressed, then forward into the layout that was meant.
 
 A `UserPromptSubmit` hook already handles the common case: when it is confident
 it annotates the prompt with the reading, and otherwise it stays silent. Reach
@@ -24,14 +28,16 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/kbfix.mjs" "בםצצןא שמג פודי א�
 ```
 
 `--json` for the full verdict with scores, `--explain` for the per-token
-breakdown when you want to know why it decided what it decided, `--to-en` and
-`--to-he` to transpose without scoring, `--force` to transpose anyway after it
+breakdown when you want to know why it decided what it decided, `--to <lang>` to
+transpose without scoring, `--layouts` to see what is installed, `--force` to transpose anyway after it
 abstained, `--self-test` and `--bench` for the gates. Exit 0 means confident, 3
 means it abstained. `--help` carries the full flag list.
 
-Detection runs in **both directions** and is whole-message or nothing. The
-verdict is symmetric: transpose, then ask whether the result reads better as
-real prose than the original did, and only say so when the gap is wide.
+Detection runs between **every installed layout** and is whole-message or
+nothing. The verdict is symmetric: transpose into each other layout, then ask
+whether any reading is plausible prose, clearly better than the text as typed,
+and clearly better than the runner-up. With three layouts a Latin string has two
+possible readings, and when both look fine it abstains rather than pick.
 
 ## How it decides
 
@@ -46,32 +52,36 @@ it has never seen, and that is most of the language. `לדוגמא` is nobody's
 stopword, so under a list-only scorer `ksudnt` is undetectable.
 
 Both channels are generated from frequency corpora by `scripts/build-model.mjs`
-and committed as `layouts/<pair>/model.json`. Nothing is tuned by hand at
+and committed as `layouts/<lang>/model.json`. Nothing is tuned by hand at
 runtime. If you change the model, re-run `--bench` and `scripts/stress.mjs`
 before trusting it.
 
 ## Four things a naive character swap gets wrong
 
-1. **Capitals vanish.** 21 shifted Latin letters (`Q W E R T Y I O P S F G H J L
-   Z X V B N M`) emit nothing on the Hebrew layout. `Push` loses its `P` at the
-   keyboard. Intended capitalisation is unrecoverable, so never claim to have
-   restored it.
+1. **Capitals vanish on the Hebrew layout.** 21 shifted Latin letters
+   (`Q W E R T Y I O P S F G H J L Z X V B N M`) emit nothing there. `Push`
+   loses its `P` at the keyboard, so intended capitalisation is unrecoverable
+   and you must never claim to have restored it. This is a property of the
+   script, not a bug: Hebrew is unicameral. Russian is bicameral and drops
+   nothing, so there the case genuinely survives and `Ghbdtn` reads as `Привет`.
 2. **Five capitals do emit, and two collide.** `A→שׁ`, `C→לֹ`, `D→„`, `K→לֹ`,
    `U→וֹ`. These are multi-codepoint (letter plus niqqud), so decode
    longest-match first. `C` and `K` both give `לֹ`, and the tool picks `c`.
 3. **Punctuation shifts silently.** `q→/`, `w→׳`, `'→,`, `,→ת`, `.→ץ`, `/→.`,
    `;→ף`, `` ` ``→`;`, and `[`↔`]` swap. A decoder that only handles א-ת mangles
    these. This is why `/commit` arrives as `.בםצצןא`.
-4. **Digits and most symbols are identical in both layouts,** so they carry zero
+4. **Digits and most symbols are identical across layouts,** so they carry zero
    directional signal. A number-heavy string is genuinely undecidable.
 
 ## When to abstain
 
-The tool refuses rather than guesses in three cases, and you should too:
+The tool refuses rather than guesses in four cases, and you should too:
 
 - **Mixed scripts.** `commit and push לmain` is left alone. Half-decoding is
   worse than not decoding, because short words are ambiguous: `אם` is at once
   real Hebrew ("if") and layout-typed `to`.
+- **Two layouts read equally well.** Latin input could be intended Hebrew or
+  intended Russian. When neither wins clearly, no answer is safe.
 - **Under four signal letters.** `.פר` could be `/pr`, but there is not enough
   evidence. Ask.
 - **The original reads about as well as the transposition.** No call is safe.
@@ -89,6 +99,7 @@ Hebrew words do not do that. `בםצצןא` has two.
   only knows whether the words are real, not whether the request makes sense
   here. If it reads as valid prose but asks for something that makes no sense in
   context, ask rather than act.
-- **The shipped table is for one specific pair of input sources.** It is correct
-  for macOS "ABC" and "Hebrew", and wrong for "Hebrew - QWERTY" and
-  "Hebrew - PC". See `layouts/README.md` to generate your own.
+- **The shipped tables are for specific input sources.** They are correct for
+  macOS "ABC", "Hebrew" and "Russian" (the standard ЙЦУКЕН board), and wrong for
+  "Hebrew - QWERTY", "Hebrew - PC" and the phonetic "Russian - QWERTY". See
+  `layouts/README.md` to generate your own.

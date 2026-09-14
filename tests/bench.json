@@ -1,5 +1,5 @@
 {
-  "note": "Every line here must be left ALONE. With both directions live, any ordinary prompt is a detection candidate, so this corpus is what decides whether the thing is shippable. A hit here is a bug, not a tuning opportunity. Identifier-heavy prompts are the real risk: they score badly as English, which is exactly the condition a false positive needs.",
+  "note": "Every line here must be left ALONE. Every ordinary prompt is a detection candidate, so this corpus is what decides whether the thing is shippable. A hit here is a bug, not a tuning opportunity. Identifier-heavy prompts are the real risk: they score badly as English, which is exactly the condition a false positive needs. With three layouts a Latin string has two possible readings, so the ambiguity gate matters too.",
   "quiet": [
     {
       "label": "ordinary English prompts",
@@ -89,6 +89,31 @@
       ]
     },
     {
+      "label": "real Russian prompts",
+      "lines": [
+        "привет как дела",
+        "спасибо большое за помощь",
+        "это не работает у меня",
+        "можешь проверить этот файл",
+        "я хочу изменить цвет кнопки",
+        "давай начнём сначала",
+        "что здесь происходит",
+        "добавь ещё одну кнопку",
+        "запусти тесты снова",
+        "пришли мне ссылку пожалуйста",
+        "напиши краткое резюме",
+        "завтра продолжим с этим",
+        "теперь всё работает",
+        "объясни что ты сделал",
+        "нужно исправить эту ошибку",
+        "где ты сохранил файл",
+        "хорошо, продолжай",
+        "я не понял ответ",
+        "открой настройки проекта",
+        "сделай кнопку больше"
+      ]
+    },
+    {
       "label": "too little signal, or no direction at all",
       "lines": [
         "ok",
@@ -109,7 +134,9 @@
         "commit and push ל main",
         "תבדוק את ה readme",
         "הקובץ src/app.tsx לא נטען",
-        "run the build ואז תשלח לי"
+        "run the build ואז תשלח לי",
+        "проверь файл src/app.tsx",
+        "run the build и пришли мне"
       ]
     }
   ]

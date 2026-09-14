@@ -1,11 +1,13 @@
 {
   "name": "kbfix",
-  "description": "Single-plugin marketplace for the kbfix plugin.",
-  "owner": { "name": "Bar Moshe" },
+  "description": "Recover text typed with the wrong keyboard layout selected. A UserPromptSubmit hook reads every prompt, and when it is confident the keystrokes came out of the wrong layout it says how the prompt reads instead. It annotates, it never rewrites what you typed. English, Hebrew and Russian ship; adding a language is adding a folder.",
+  "owner": {
+    "name": "Bar Moshe"
+  },
   "plugins": [
     {
       "name": "kbfix",
-      "description": "Recover text typed with the wrong keyboard layout selected. Annotates the prompt with how it actually reads, never rewrites it. English/Hebrew by default, pluggable layout pairs.",
+      "description": "Recover text typed with the wrong keyboard layout selected. Annotates the prompt with how it actually reads, never rewrites it. English, Hebrew and Russian, any direction between them.",
       "source": "./"
     }
   ]

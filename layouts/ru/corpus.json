@@ -1,0 +1,7 @@
+{
+  "url": "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/ru/ru_full.txt",
+  "separator": " ",
+  "credit": "hermitdave/FrequencyWords, OpenSubtitles 2018 word frequencies.",
+  "trainMaxWords": 60000,
+  "trainFilterWhy": "No dictionary filter is available for Russian here, so the training set is capped instead: subtitle corpora have a long tail of transliterations and typos that would make the model too permissive."
+}
